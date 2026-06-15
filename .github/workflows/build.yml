@@ -1,0 +1,30 @@
+name: 打包 SmartGreenhouse
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 安装依赖
+        run: |
+          pip install -r "smart_greenhouse 2/requirements.txt"
+          pip install pyinstaller
+      - name: 打包
+        run: |
+          cd "smart_greenhouse 2"
+          pyinstaller --name=SmartGreenhouse --windowed --noconfirm --clean --onefile --icon=icon.icns `
+            --hidden-import=serial --hidden-import=matplotlib --hidden-import=matplotlib.backends.backend_tkagg `
+            --hidden-import=matplotlib.figure --hidden-import=matplotlib.backends.backend_agg `
+            --hidden-import=kiwisolver --hidden-import=matplotlib.font_manager main.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SmartGreenhouse-Windows
+          path: smart_greenhouse 2/dist/SmartGreenhouse.exe
