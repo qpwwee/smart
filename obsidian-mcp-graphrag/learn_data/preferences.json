@@ -1,0 +1,26 @@
+[
+  {
+    "rule": "用具体品种代替泛称'猫'",
+    "sources": [
+      "mem_98d3b6b6"
+    ],
+    "count": 1,
+    "active": true
+  },
+  {
+    "rule": "偏好包含颜色信息的描述",
+    "sources": [
+      "mem_8954e546"
+    ],
+    "count": 1,
+    "active": true
+  },
+  {
+    "rule": "偏好识别并标注品牌名称",
+    "sources": [
+      "mem_8954e546"
+    ],
+    "count": 1,
+    "active": true
+  }
+]
