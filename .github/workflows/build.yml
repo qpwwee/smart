@@ -1,10 +1,8 @@
 name: 打包 SmartGreenhouse
-
 on:
   push:
     branches: [ "main" ]
   workflow_dispatch:
-
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -15,16 +13,15 @@ jobs:
           python-version: "3.11"
       - name: 安装依赖
         run: |
-          pip install -r "smart_greenhouse 2/requirements.txt"
+          pip install -r requirements.txt
           pip install pyinstaller
       - name: 打包
         run: |
-          cd "smart_greenhouse 2"
-          pyinstaller --name=SmartGreenhouse --windowed --noconfirm --clean --onefile --icon=icon.icns `
+          pyinstaller --name=SmartGreenhouse --windowed --noconfirm --clean --onefile `
             --hidden-import=serial --hidden-import=matplotlib --hidden-import=matplotlib.backends.backend_tkagg `
             --hidden-import=matplotlib.figure --hidden-import=matplotlib.backends.backend_agg `
             --hidden-import=kiwisolver --hidden-import=matplotlib.font_manager main.py
       - uses: actions/upload-artifact@v4
         with:
           name: SmartGreenhouse-Windows
-          path: smart_greenhouse 2/dist/SmartGreenhouse.exe
+          path: dist/SmartGreenhouse.exe
