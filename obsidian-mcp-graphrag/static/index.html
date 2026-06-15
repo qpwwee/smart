@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge Base</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+</head>
+<body>
+
+<!-- ===== Login View ===== -->
+<div id="loginView" class="login-page">
+  <div class="login-card">
+    <div class="login-title">🔒 Knowledge Base</div>
+    <div class="login-subtitle">请输入密码访问知识库</div>
+    <form class="login-form" id="loginForm">
+      <div class="form-group">
+        <input type="password" id="passwordInput" class="form-input" placeholder="输入密码" autofocus required>
+      </div>
+      <button type="submit" class="login-btn">进入</button>
+      <div class="login-error" id="loginError" style="display:none"></div>
+    </form>
+  </div>
+</div>
+
+<!-- ===== Main App View ===== -->
+<div id="mainView" class="app-container" style="display:none">
+
+  <!-- ── Header ── -->
+  <header class="header">
+    <div class="header-logo">📚 Knowledge Base</div>
+    <div class="header-actions">
+      <button class="header-btn" id="darkModeBtn" title="切换明暗主题">🌙</button>
+      <button class="header-btn" id="graphToggleBtn" onclick="toggleGraph()" title="知识图谱">📊</button>
+      <a href="/logout" style="color:var(--text-muted);font-size:var(--font-size-sm);margin-left:var(--space-sm);text-decoration:none">退出</a>
+    </div>
+  </header>
+
+  <!-- ── History Sidebar ── -->
+  <div class="history-panel" id="historyPanel">
+    <div class="history-header">
+      <span>📋 历史记录</span>
+      <button class="history-new-btn" id="historyClearBtn">🗑️ 清空</button>
+    </div>
+    <div class="history-list" id="historyList">
+      <div class="history-empty">暂无历史</div>
+    </div>
+  </div>
+
+  <!-- ── Main Content ── -->
+  <main class="main-content">
+    <div class="content-wrapper">
+
+      <!-- Search Section -->
+      <div class="search-section">
+        <div class="search-box-wrapper">
+          <input type="text" id="q" class="search-box" placeholder="输入问题，回车搜索... Ctrl+K 快捷搜索" autofocus>
+          <button class="search-btn" onclick="doSearch()">🔍 搜索</button>
+          <button class="search-cancel-btn" id="cancelBtn" style="display:none">✕ 取消</button>
+        </div>
+      </div>
+
+      <!-- Vision Upload Area -->
+      <div class="vision-section" style="margin-top:var(--space-md)">
+        <div style="display:flex;gap:var(--space-sm);flex-wrap:wrap;align-items:center">
+          <label class="vision-dropzone" style="padding:var(--space-md);flex-direction:row;gap:var(--space-sm);cursor:pointer">
+            🖼️ 上传图片识图
+            <input type="file" id="imageInput" accept="image/*" style="display:none" onchange="onImageSelected(event)">
+          </label>
+          <div id="imagePreview" style="display:none;position:relative">
+            <img id="selectedImage" style="max-height:80px;border-radius:var(--border-radius-sm);border:1px solid var(--border-color)">
+          </div>
+          <span style="font-size:var(--font-size-xs);color:var(--text-muted)" id="imageInfo"></span>
+          <button class="vision-btn" id="visionBtn" onclick="doVision()" style="display:none">🔍 识图</button>
+
+          <label class="vision-dropzone" style="padding:var(--space-md);flex-direction:row;gap:var(--space-sm);cursor:pointer">
+            🎬 上传视频分析
+            <input type="file" id="videoInput" accept="video/*" style="display:none" onchange="onVideoSelected(event)">
+          </label>
+          <button class="vision-btn" id="videoGoBtn" onclick="processVideo()" style="display:none">▶ 分析</button>
+          <button class="vision-btn" id="videoCancelBtn" onclick="cancelVideo()" style="display:none;color:var(--accent-danger);border-color:var(--accent-danger)">✕</button>
+        </div>
+
+        <!-- Video Player -->
+        <div id="videoControls" style="display:none;margin-top:var(--space-sm)">
+          <video id="videoPlayer" controls style="max-width:100%;max-height:300px;border-radius:var(--border-radius)"></video>
+        </div>
+
+        <!-- Video Progress -->
+        <div class="video-progress" id="videoProgress" style="display:none;margin-top:var(--space-sm)">
+          <div class="video-progress-bar" style="height:4px;background:var(--border-color);border-radius:2px;overflow:hidden">
+            <div class="video-progress-fill" id="videoProgressFill" style="height:100%;width:0%;background:linear-gradient(90deg,#00d4aa,#6c63ff);transition:width .3s"></div>
+          </div>
+          <div class="video-progress-text" id="videoProgressText" style="font-size:var(--font-size-xs);color:var(--text-muted)"></div>
+          <div id="videoFrameResults" style="margin-top:var(--space-sm)"></div>
+        </div>
+      </div>
+
+
+
+      <!-- Output Area -->
+      <div id="output" style="margin-top:var(--space-lg)"></div>
+
+      <!-- Knowledge Graph Panel -->
+      <div id="graphPanel" style="display:none;margin-top:var(--space-lg);flex-direction:column;gap:var(--space-sm)">
+        <div style="display:flex;gap:var(--space-sm);align-items:center">
+          <input type="text" id="graphSearch" class="graph-search-input" placeholder="🔍 搜索图谱节点..." style="flex:1;padding:8px 12px;border:1px solid var(--border-color);border-radius:var(--border-radius);background:var(--bg-input);color:var(--text-primary);outline:none">
+          <button id="graphExportBtn" class="graph-btn" title="导出图片">📷</button>
+          <button class="graph-btn" onclick="resetGraph()" title="重置视图">⟳</button>
+        </div>
+        <div id="graphContainer" class="graph-container"></div>
+        <div class="graph-legend">
+          <div class="graph-legend-item"><span class="graph-legend-dot" style="background:#6c63ff"></span>概念</div>
+          <div class="graph-legend-item"><span class="graph-legend-dot" style="background:#00d4aa"></span>实体</div>
+          <div class="graph-legend-item"><span class="graph-legend-dot" style="background:#ff9f43"></span>来源</div>
+          <div class="graph-legend-item"><span class="graph-legend-dot" style="background:#888"></span>其他</div>
+        </div>
+      </div>
+
+      <!-- Market Panel -->
+      <div class="market-wrapper" style="margin-top:var(--space-lg)">
+        <div class="market-header-bar">
+          <div class="market-header-row">
+            <div class="market-title">📊 行情面板</div>
+            <span class="market-refresh-hint">每30秒自动刷新</span>
+          </div>
+          <div class="market-tabs">
+            <button class="market-tab active" data-tab="indices">📊指数行情</button>
+            <button class="market-tab" data-tab="sectors">📈板块对比</button>
+            <button class="market-tab" data-tab="limitup">🔥涨停板</button>
+            <button class="market-tab" data-tab="abnormal">⚡异动监控</button>
+            <button class="market-tab" data-tab="pick">🧠AI荐股</button>
+          <button class="market-tab" data-tab="learn">🧠 学习中心</button>
+          </div>
+        </div>
+        <div class="market-panels">
+          <div class="market-tab-content" id="market-indices">
+            <div class="spinner-center"><div class="spinner spinner-lg"></div></div>
+          </div>
+          <div class="market-tab-content" id="market-sectors" style="display:none">
+            <div class="market-content">
+              <div id="sectorChart" style="height:400px;width:100%"></div>
+            </div>
+          </div>
+          <div class="market-tab-content" id="market-limitup" style="display:none">
+            <div class="spinner-center"><div class="spinner spinner-lg"></div></div>
+          </div>
+          <div class="market-tab-content" id="market-abnormal" style="display:none">
+            <div class="spinner-center"><div class="spinner spinner-lg"></div></div>
+          </div>
+          <div class="market-tab-content" id="market-pick" style="display:none"></div>
+          <div class="market-tab-content" id="market-learn" style="display:none">
+            <!-- 学习中心内容 -->
+            <div class="learn-center" id="learnCenter">
+              <!-- 统计卡片 -->
+              <div class="learn-stats" id="learnStats">
+                <div class="learn-stat-card"><div class="learn-stat-num" id="statTotal">-</div><div class="learn-stat-label">总记忆</div></div>
+                <div class="learn-stat-card"><div class="learn-stat-num" id="statRated">-</div><div class="learn-stat-label">已评分率</div></div>
+                <div class="learn-stat-card"><div class="learn-stat-num" id="statRecent">-</div><div class="learn-stat-label">近7天</div></div>
+                <div class="learn-stat-card"><div class="learn-stat-num" id="statPrefs">-</div><div class="learn-stat-label">活跃偏好</div></div>
+              </div>
+              <!-- 设置 -->
+              <div class="learn-settings">
+                <label class="learn-toggle">
+                  <span class="learn-toggle-label">⚡ 自动应用修正模式</span>
+                  <input type="checkbox" id="autoApplyToggle" checked onchange="onAutoApplyToggle()">
+                  <span class="learn-toggle-slider"></span>
+                </label>
+                <span style="font-size:var(--font-size-xs);color:var(--text-muted)">开启后分析时自动注入偏好规则和相似案例</span>
+              </div>
+              <!-- 偏好规则 -->
+              <div class="learn-section">
+                <div class="learn-section-title">📋 偏好规则</div>
+                <div class="learn-prefs" id="learnPrefs">
+                  <div class="learn-empty">暂无偏好规则，提交几次修正后自动提取</div>
+                </div>
+              </div>
+              <!-- 记忆列表 -->
+              <div class="learn-section">
+                <div class="learn-section-title">📝 记忆列表 <span id="memTotal" style="font-size:var(--font-size-xs);color:var(--text-muted)"></span></div>
+                <div class="learn-memories" id="learnMemories">
+                  <div class="learn-empty">暂无记忆记录</div>
+                </div>
+                <div class="learn-pagination" id="learnPagination"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Watchlist Panel -->
+      <div class="watchlist-panel" style="margin-top:var(--space-lg)">
+        <div class="watchlist-header">
+          <div class="watchlist-title">⭐ 自选股</div>
+        </div>
+        <div id="watchlist" class="watchlist-items">
+          <div class="watchlist-empty">暂无自选，在行情中点击 ☆ 添加</div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- 反馈浮层 -->
+  <div class="feedback-panel" id="feedbackPanel">
+    <div class="feedback-bar" id="feedbackBar" onclick="toggleFeedback()">
+      <span class="feedback-bar-icon">🧠</span>
+      <span class="feedback-bar-text">反馈</span>
+      <span class="feedback-bar-count" id="feedbackCount" style="display:none">0</span>
+    </div>
+    <div class="feedback-body" id="feedbackBody">
+      <div class="feedback-header">
+        <span>🧠 反馈</span>
+        <button class="feedback-fold-btn" onclick="foldFeedback()" title="折叠">◀</button>
+      </div>
+      <div class="feedback-content">
+        <div class="feedback-summary" id="feedbackSummary">等待分析结果...</div>
+        <div class="feedback-rating">
+          <button class="fb-rate-btn" id="fbGood" onclick="rateFeedback(5)" title="准确">👍 准确</button>
+          <button class="fb-rate-btn" id="fbBad" onclick="rateFeedback(1)" title="不准确">👎 不准确</button>
+        </div>
+        <textarea class="feedback-textarea" id="feedbackText" rows="5" placeholder="在这里修正描述..."></textarea>
+        <button class="feedback-submit-btn" id="feedbackSubmit" onclick="submitFeedback()">💾 提交反馈</button>
+        <div class="feedback-saved" id="feedbackSaved">✅ 已保存</div>
+      </div>
+      <div class="feedback-footer">
+        <span>📊 已收集 <span id="fbSessionCount">0</span> 条</span>
+        <a href="#" onclick="showLearnTab(event)" class="feedback-link">➡ 学习中心</a>
+      </div>
+      <div class="feedback-auto-toggle">
+        <label class="learn-toggle" style="font-size:var(--font-size-xs)">
+          <span>⚡ 自动修正</span>
+          <input type="checkbox" id="autoApplyToggleFb" checked onchange="onAutoApplyToggle()">
+          <span class="learn-toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Auth Check + Login Handler ===== -->
+<script>
+(function() {
+  var loginView = document.getElementById('loginView');
+  var mainView = document.getElementById('mainView');
+  var loginForm = document.getElementById('loginForm');
+  var loginError = document.getElementById('loginError');
+
+  function showLogin() {
+    loginView.style.display = '';
+    mainView.style.display = 'none';
+  }
+
+  function showMain() {
+    loginView.style.display = 'none';
+    mainView.style.display = '';
+  }
+
+  fetch('/api/check-auth').then(function(r) {
+    if (r.ok) showMain();
+  }).catch(function() {});
+
+  loginForm.addEventListener('submit', function(e) {
+    e.preventDefault();
+    var pwd = document.getElementById('passwordInput').value;
+    fetch('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'password=' + encodeURIComponent(pwd)
+    }).then(function(r) {
+      if (r.ok) {
+        window.location.reload();
+      } else {
+        loginError.textContent = '密码错误';
+        loginError.style.display = '';
+      }
+    }).catch(function(err) {
+      loginError.textContent = '网络错误: ' + err.message;
+      loginError.style.display = '';
+    });
+  });
+})();
+</script>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
