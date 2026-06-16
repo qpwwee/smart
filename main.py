@@ -57,8 +57,6 @@ SENSOR_CONFIG = [
       'color': C['temp'],  'icon': '🌡',  'good': (20, 30) },
     { 'key': 'humidity',    'label': '湿度',   'unit': '%',   'fmt': '{:.1f}',
       'color': C['humi'],  'icon': '💧',  'good': (45, 70) },
-    { 'key': 'light',       'label': '光照',   'unit': 'lux', 'fmt': '{}',
-      'color': C['light'], 'icon': '☀',  'good': (500, 2500) },
 ]
 
 
@@ -230,6 +228,10 @@ class SmartGreenhouseApp:
             card['frame'].pack(side='left', fill='both', expand=True, padx=5)
             self._cards[cfg['key']] = card
 
+        # 控制卡片（代替原来的光照卡片）
+        ctrl_card = self._make_control_card(frame)
+        ctrl_card.pack(side='left', fill='both', expand=True, padx=5)
+
     def _make_card(self, parent, cfg):
         color = cfg['color']
         
@@ -298,6 +300,70 @@ class SmartGreenhouseApp:
             'cfg': cfg,
         }
 
+    def _make_control_card(self, parent):
+        outer = tk.Frame(parent, bg=C['bg'], bd=0)
+        
+        shadow = tk.Canvas(outer, width=380, height=160,
+                          bg=C['bg'], highlightthickness=0, bd=0)
+        shadow.pack(fill='both', expand=True, padx=2, pady=2)
+        shadow.create_rectangle(8, 8, 388, 168, fill='#000000', stipple='gray25')
+        
+        canvas = tk.Canvas(shadow, width=380, height=160,
+                          bg=C['card'], highlightthickness=0, bd=0)
+        canvas.place(x=0, y=0)
+        
+        color = C['purple']
+        for i in range(6):
+            alpha = 1.0 - i * 0.15
+            r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+            r = int(r * alpha)
+            g = int(g * alpha)
+            b = int(b * alpha)
+            tint = f'#{r:02x}{g:02x}{b:02x}'
+            canvas.create_rectangle(0, i, 400, i+1, fill=tint, outline='')
+        
+        canvas.create_text(38, 38, text='⚙',
+                          font=(_FONT, 18), anchor='center', fill='#ffffff')
+        canvas.create_text(70, 30, text='设备控制',
+                          font=(_FONT, 12, 'bold'), anchor='w', fill=C['text_dim'])
+
+        btn_frame = tk.Frame(canvas, bg=C['card'])
+        btn_frame.place(x=20, y=60, width=340, height=80)
+
+        self.fan_btn = RoundButton(btn_frame, text='🔛 风扇: 关闭',
+                                   bg=C['bg'], hover_bg=C['card_hover'],
+                                   accent=C['purple'], fg=C['text'],
+                                   command=self._toggle_fan,
+                                   font_size=13, width=150, height=44)
+        self.fan_btn.pack(side='left', padx=(0, 10))
+
+        self.fan_dot = tk.Canvas(btn_frame, width=12, height=12,
+                                 bg=C['card'], highlightthickness=0)
+        self.fan_dot.pack(side='left', padx=(0, 10))
+        self._fd_off = self.fan_dot.create_oval(1, 1, 11, 11,
+                                                fill=C['text_muted'], outline='')
+        self._fd_on = self.fan_dot.create_oval(1, 1, 11, 11,
+                                               fill=C['green'], outline='',
+                                               state='hidden')
+
+        self.led_btn = RoundButton(btn_frame, text='💡 灯光: 关闭',
+                                   bg=C['bg'], hover_bg=C['card_hover'],
+                                   accent=C['orange'], fg=C['text'],
+                                   command=self._toggle_led,
+                                   font_size=13, width=150, height=44)
+        self.led_btn.pack(side='left')
+
+        self.led_dot = tk.Canvas(btn_frame, width=12, height=12,
+                                 bg=C['card'], highlightthickness=0)
+        self.led_dot.pack(side='left')
+        self._ld_off = self.led_dot.create_oval(1, 1, 11, 11,
+                                                fill=C['text_muted'], outline='')
+        self._ld_on = self.led_dot.create_oval(1, 1, 11, 11,
+                                               fill=C['orange'], outline='',
+                                               state='hidden')
+
+        return outer
+
     # ── 控制栏 ─────────────────────────────────
     def _build_controls(self, parent):
         frame = tk.Frame(parent, bg=C['bg'])
@@ -342,45 +408,9 @@ class SmartGreenhouseApp:
                                      font_size=11, width=90, height=40)
         self._mock_btn.pack(side='left', padx=(6, 0))
 
-        # ── 右侧：风扇 + 清空 ───────────────────────
+        # ── 右侧：清空数据 ───────────────────────
         right_frame = tk.Frame(frame, bg=C['bg'])
         right_frame.pack(side='right')
-
-        # 风扇按钮（自定义圆角）
-        self.fan_btn = RoundButton(right_frame, text='🔛 风扇: 关闭',
-                                   bg=C['card'], hover_bg=C['card_hover'],
-                                   accent=C['purple'], fg=C['text'],
-                                   command=self._toggle_fan,
-                                   font_size=13, width=180, height=44)
-        self.fan_btn.pack(side='left', padx=(0, 12))
-
-        # 风扇状态灯
-        self.fan_dot = tk.Canvas(right_frame, width=12, height=12,
-                                 bg=C['bg'], highlightthickness=0)
-        self.fan_dot.pack(side='left')
-        self._fd_off = self.fan_dot.create_oval(1, 1, 11, 11,
-                                                fill=C['text_muted'], outline='')
-        self._fd_on = self.fan_dot.create_oval(1, 1, 11, 11,
-                                               fill=C['green'], outline='',
-                                               state='hidden')
-
-        # RGB LED 按钮
-        self.led_btn = RoundButton(right_frame, text='💡 灯光: 关闭',
-                                   bg=C['card'], hover_bg=C['card_hover'],
-                                   accent=C['orange'], fg=C['text'],
-                                   command=self._toggle_led,
-                                   font_size=13, width=180, height=44)
-        self.led_btn.pack(side='left', padx=(12, 12))
-
-        # LED 状态灯
-        self.led_dot = tk.Canvas(right_frame, width=12, height=12,
-                                 bg=C['bg'], highlightthickness=0)
-        self.led_dot.pack(side='left')
-        self._ld_off = self.led_dot.create_oval(1, 1, 11, 11,
-                                                fill=C['text_muted'], outline='')
-        self._ld_on = self.led_dot.create_oval(1, 1, 11, 11,
-                                               fill=C['orange'], outline='',
-                                               state='hidden')
 
         # 清空数据
         self.clear_btn = RoundButton(right_frame, text='🗑 清空数据',
