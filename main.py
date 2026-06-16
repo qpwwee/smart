@@ -364,6 +364,24 @@ class SmartGreenhouseApp:
                                                fill=C['green'], outline='',
                                                state='hidden')
 
+        # RGB LED 按钮
+        self.led_btn = RoundButton(right_frame, text='💡 灯光: 关闭',
+                                   bg=C['card'], hover_bg=C['card_hover'],
+                                   accent=C['orange'], fg=C['text'],
+                                   command=self._toggle_led,
+                                   font_size=13, width=180, height=44)
+        self.led_btn.pack(side='left', padx=(12, 12))
+
+        # LED 状态灯
+        self.led_dot = tk.Canvas(right_frame, width=12, height=12,
+                                 bg=C['bg'], highlightthickness=0)
+        self.led_dot.pack(side='left')
+        self._ld_off = self.led_dot.create_oval(1, 1, 11, 11,
+                                                fill=C['text_muted'], outline='')
+        self._ld_on = self.led_dot.create_oval(1, 1, 11, 11,
+                                               fill=C['orange'], outline='',
+                                               state='hidden')
+
         # 清空数据
         self.clear_btn = RoundButton(right_frame, text='🗑 清空数据',
                                      bg=C['card'], hover_bg=C['card_hover'],
@@ -381,7 +399,6 @@ class SmartGreenhouseApp:
         titles = [
             ('🌡 温度趋势', 'temperature', C['temp'], '°C'),
             ('💧 湿度趋势', 'humidity', C['humi'], '%'),
-            ('☀ 光照趋势', 'light', C['light'], 'lux'),
         ]
 
         for title, key, color, unit in titles:
@@ -492,6 +509,23 @@ class SmartGreenhouseApp:
             self.fan_dot.itemconfig(self._fd_on, state='hidden')
             self.fan_dot.itemconfig(self._fd_off, state='normal')
 
+    # ── RGB LED 控制 ─────────────────────────────────
+    def _toggle_led(self):
+        led = self.handler.get_led()
+        self.handler.set_led(not led)
+
+    def _update_led_ui(self, on):
+        if on:
+            self.led_btn.set_text('💡 灯光: 开启')
+            self.led_btn.set_accent(C['green'])
+            self.led_dot.itemconfig(self._ld_on, state='normal')
+            self.led_dot.itemconfig(self._ld_off, state='hidden')
+        else:
+            self.led_btn.set_text('💡 灯光: 关闭')
+            self.led_btn.set_accent(C['orange'])
+            self.led_dot.itemconfig(self._ld_on, state='hidden')
+            self.led_dot.itemconfig(self._ld_off, state='normal')
+
     def _clear_data(self):
         self.handler.buffer.clear()
         for key in self.figures:
@@ -564,6 +598,9 @@ class SmartGreenhouseApp:
 
         # ─ 风扇 ─
         self._update_fan_ui(latest.get('fan_status', False))
+
+        # ─ LED ─
+        self._update_led_ui(self.handler.get_led())
 
         # ─ 时间戳 ─
         ts = latest.get('_timestamp', time.time())

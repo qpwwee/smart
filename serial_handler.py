@@ -285,6 +285,7 @@ class SerialHandler:
         self._mock = None
         self._lock = threading.Lock()
         self._fan_state = False
+        self._led_state = False
         # 连接状态
         self._port = None
         self._state = self.STATE_IDLE
@@ -333,6 +334,23 @@ class SerialHandler:
 
     def get_fan(self):
         return self._fan_state
+
+    def set_led(self, on: bool):
+        """RGB LED 控制：开/关白光"""
+        self._led_state = on
+        if on:
+            cmd = bytes([0x21, 0x03, 0x09, 0x01, 0x5A, 0x40, 0x19, 0x6C, 0x55, 0xFF, 0xFF, 0xFF])
+        else:
+            cmd = bytes([0x21, 0x03, 0x09, 0x01, 0x5A, 0x40, 0x2D, 0x6C, 0x55, 0x00, 0x00, 0x00])
+        with self._lock:
+            if self._serial and self._serial.is_open:
+                try:
+                    self._serial.write(cmd)
+                except Exception:
+                    pass
+
+    def get_led(self):
+        return self._led_state
 
     def get_state(self):
         return self._state
