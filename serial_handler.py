@@ -283,7 +283,11 @@ class SerialHandler:
     # ---- public API ----
     def set_fan(self, on: bool):
         self._fan_state = on
-        cmd = b'FAN_ON\n' if on else b'FAN_OFF\n'
+        # 风扇控制指令（十六进制）
+        if on:
+            cmd = bytes([0x21, 0x01, 0x09, 0x01, 0x5A, 0x40, 0x2C, 0x66, 0x24, 0x31, 0xA8])
+        else:
+            cmd = bytes([0x21, 0x01, 0x09, 0x01, 0x5A, 0x40, 0x2C, 0x66, 0x24, 0x30, 0xAF])
         with self._lock:
             if self._serial and self._serial.is_open:
                 try:
