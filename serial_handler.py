@@ -140,18 +140,21 @@ def parse_sensor_line(line):
     return data
 
 
-def parse_zigbee_frame(frame_bytes):
+def parse_zigbee_frame(frame_bytes, sensor_type=0x01):
     """
     解析 ZigBee 0x21 二进制传感器帧（12 字节）。
 
     帧格式（来自 C 代码 GenericApp.c）:
       [0]  0x21  帧头
-      [1]  0x02  固定标记字节 1
+      [1]  0x02  固定标记字节 1 (DHT11) / 0x03 (光照)
       [2]  0x09  固定标记字节 2（表示数据长度 9）
       [3..8] 固定填充字节
-      [9]  temp_H      温度（DHT11 整数部分，uint8，单位℃）
-      [10] humidity_H  湿度（DHT11 整数部分，uint8，单位%）
-      [11] CRC8        CRC8 校验（基于字节 [0..10]）
+      [9..10] 传感器数据
+      [11] CRC8
+
+    sensor_type: 0x01 = 温湿度 (DHT11), 0x02 = 光照, 0x00 = 未知
+      - 0x01: byte[9]=温度, byte[10]=湿度
+      - 0x02: byte[9..10]=16-bit 光照值 (大端)
 
     返回 dict 或 None（长度不对 / 帧头不对 / CRC 失败）
     """
@@ -163,30 +166,63 @@ def parse_zigbee_frame(frame_bytes):
     expected_crc = crc8(frame_bytes[0:11])
     if frame_bytes[11] != expected_crc:
         return None
-    temp = float(frame_bytes[9])
-    humi = float(frame_bytes[10])
-    return {
-        'temperature': temp,
-        'humidity': humi,
+    result = {
+        'temperature': 0.0,
+        'humidity': 0.0,
         'light': 0,
         'fan_status': False,
         '_format': 'zigbee_binary',
+        '_sensor_type': sensor_type,
     }
+    if sensor_type == 0x02:  # 光照传感器
+        result['light'] = (frame_bytes[9] << 8) | frame_bytes[10]
+    else:  # 温湿度 (DHT11) 或未知（向后兼容）
+        result['temperature'] = float(frame_bytes[9])
+        result['humidity'] = float(frame_bytes[10])
+    return result
 
 
 def scan_for_zigbee_frame(byte_buffer, start=0):
-    """简化版：扫描字节流中首个 0x21 帧，返回 (dict, new_offset)。"""
+    """
+    扫描字节流中首个 ZigBee 帧。
+
+    新协议（协调器转发）：1 字节 type 标识 + 12 字节原 0x21 帧 = 13 字节
+    旧协议（直连/无 type）：12 字节 0x21 帧
+
+    帧结构（原 12 字节）:
+      [0]  0x21  帧头
+      [1]  0x02 (DHT11) / 0x03 (光照)  传感器标记
+      [2]  0x09  固定
+      [3..10] 传感器数据
+      [11] CRC8
+    """
     blen = len(byte_buffer)
     i = start
+    # 1) 先按 13 字节协议扫描 (带 type 前缀)
+    while i <= blen - 13:
+        if (byte_buffer[i] in (0x00, 0x01, 0x02) and
+                byte_buffer[i + 1] == 0x21 and
+                byte_buffer[i + 2] in (0x02, 0x03) and
+                byte_buffer[i + 3] == 0x09):
+            sensor_type = byte_buffer[i]
+            frame_bytes = bytes(byte_buffer[i + 1:i + 13])
+            result = parse_zigbee_frame(frame_bytes, sensor_type)
+            if result is not None:
+                return result, i + 13
+        i += 1
+    # 2) 回退: 12 字节旧协议 (无 type 前缀)
+    i = start
     while i <= blen - 12:
-        if byte_buffer[i] == 0x21 and byte_buffer[i + 1] == 0x02 and byte_buffer[i + 2] == 0x09:
-            frame = bytes(byte_buffer[i:i + 12])
-            result = parse_zigbee_frame(frame)
+        if (byte_buffer[i] == 0x21 and
+                byte_buffer[i + 1] in (0x02, 0x03) and
+                byte_buffer[i + 2] == 0x09):
+            frame_bytes = bytes(byte_buffer[i:i + 12])
+            result = parse_zigbee_frame(frame_bytes, 0x01)  # 默认按 DHT11
             if result is not None:
                 return result, i + 12
         i += 1
-    # 保留尾部最多 11 字节作为可能的不完整帧
-    keep_start = max(0, blen - 11)
+    # 保留尾部最多 12 字节作为可能的不完整帧
+    keep_start = max(0, blen - 12)
     return None, keep_start
 
 
@@ -428,33 +464,62 @@ class SerialHandler:
         扫描字节缓冲区，提取所有 0x21 格式的有效帧。
         返回 (frames 列表, 保留的未消费字节)。
 
-        修复内容：
-        1. 正确保留 consumed 之后的所有未消费字节
-        2. 对 CRC 失败但帧头匹配的字节做容错（跳过 1 字节继续扫描）
-        3. 仅在缓冲超过 _MAX_BUF_BYTES 时截断，避免累积垃圾
+        支持两种协议：
+        1. 新协议（协调器转发）：1 字节 type 标识 + 12 字节原 0x21 帧 = 13 字节
+        2. 旧协议（直连）：12 字节 0x21 帧
+
+        帧结构（原 12 字节）:
+          [0]  0x21  帧头
+          [1]  0x02 (DHT11) / 0x03 (光照)  传感器标记
+          [2]  0x09  固定
+          [3..10] 传感器数据
+          [11] CRC8
         """
         frames = []
         blen = len(byte_buf)
         i = 0
 
-        while i <= blen - 12:
-            if byte_buf[i] == 0x21:
-                # 快速过滤：检查后续固定标记字节
-                if byte_buf[i + 1] == 0x02 and byte_buf[i + 2] == 0x09:
-                    # 可能是有效帧 → 验证 CRC
-                    frame_slice = bytes(byte_buf[i:i + 12])
-                    expected = crc8(frame_slice[0:11])
-                    if frame_slice[11] == expected:
-                        parsed = parse_zigbee_frame(frame_slice)
-                        if parsed is not None:
-                            frames.append(parsed)
-                            i += 12
-                            continue
-                    else:
-                        # CRC 失败：这是一个可能是帧头但数据损坏的位置
-                        self._record_stats('crc_failures', 1)
-            # 默认前进 1 字节继续扫描
+        # 1) 先扫 13 字节协议 (带 type 前缀)
+        while i <= blen - 13:
+            if (byte_buf[i] in (0x00, 0x01, 0x02) and
+                    byte_buf[i + 1] == 0x21 and
+                    byte_buf[i + 2] in (0x02, 0x03) and
+                    byte_buf[i + 3] == 0x09):
+                sensor_type = byte_buf[i]
+                frame_slice = bytes(byte_buf[i + 1:i + 13])
+                expected = crc8(frame_slice[0:11])
+                if frame_slice[11] == expected:
+                    parsed = parse_zigbee_frame(frame_slice, sensor_type)
+                    if parsed is not None:
+                        frames.append(parsed)
+                        i += 13
+                        continue
+                else:
+                    self._record_stats('crc_failures', 1)
             i += 1
+
+        # 2) 回退: 扫 12 字节旧协议 (无 type 前缀)
+        j = 0
+        while j <= blen - 12:
+            if (byte_buf[j] == 0x21 and
+                    byte_buf[j + 1] in (0x02, 0x03) and
+                    byte_buf[j + 2] == 0x09):
+                frame_slice = bytes(byte_buf[j:j + 12])
+                expected = crc8(frame_slice[0:11])
+                if frame_slice[11] == expected:
+                    parsed = parse_zigbee_frame(frame_slice, 0x01)
+                    if parsed is not None:
+                        # 避免与新协议已解析的帧重复
+                        already = any(
+                            abs(f.get('_ts_offset', 0) - j) < 12 for f in frames
+                        )
+                        if not already:
+                            frames.append(parsed)
+                        j += 12
+                        continue
+                else:
+                    self._record_stats('crc_failures', 1)
+            j += 1
 
         # 保留 i 之后的字节（可能是尚未完整到达的一帧）
         remaining = bytearray(byte_buf[i:])
