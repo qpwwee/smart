@@ -1,4 +1,5 @@
 name: 打包 SmartGreenhouse
+# 自动构建 Windows 可执行文件
 on:
   push:
     branches: [ "main" ]
