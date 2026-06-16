@@ -263,6 +263,9 @@ class SerialHandler:
             'first_bytes_hex': '', # 首次收到的字节 (HEX 转储)
         }
         self._stats_lock = threading.Lock()
+        # 数据节流控制
+        self._last_frame_time = 0
+        self._min_frame_interval = 1.0  # 最小帧间隔（秒），每秒最多1帧
 
         # 如果传入了 port，立即切换；否则 Mock 模式
         if port:
@@ -525,18 +528,23 @@ class SerialHandler:
                     text_buf.extend(raw)
                     self._record_activity(raw)
 
+                # 数据节流：检查是否应该处理新数据
+                should_process = (timestamp - self._last_frame_time) >= self._min_frame_interval
+
                 # 1. 优先二进制扫描
                 parsed_frames, byte_buf = self._scan_buffer_for_frames(byte_buf)
-                if parsed_frames:
-                    for frame in parsed_frames:
-                        frame['fan_status'] = self._fan_state
-                        frame['_timestamp'] = timestamp
-                        frame['_mock'] = False
-                        self.buffer.append(frame)
-                        self._record_stats('binary_frames', 1)
-                        with self._stats_lock:
-                            if not self._stats.get('first_binary_ts'):
-                                self._stats['first_binary_ts'] = timestamp
+                if parsed_frames and should_process:
+                    # 只取最后一帧，丢弃中间的帧（节流）
+                    frame = parsed_frames[-1]
+                    frame['fan_status'] = self._fan_state
+                    frame['_timestamp'] = timestamp
+                    frame['_mock'] = False
+                    self.buffer.append(frame)
+                    self._record_stats('binary_frames', 1)
+                    with self._stats_lock:
+                        if not self._stats.get('first_binary_ts'):
+                            self._stats['first_binary_ts'] = timestamp
+                    self._last_frame_time = timestamp
                     text_buf = bytearray()  # 有二进制结果就清空文本缓冲
                     # 短暂让出
                     time.sleep(0.1)
@@ -544,15 +552,22 @@ class SerialHandler:
 
                 # 2. 回退：尝试文本协议解析
                 text_results, text_buf = self._try_parse_text(text_buf)
-                if text_results:
-                    for frame in text_results:
-                        frame['fan_status'] = self._fan_state
-                        frame['_timestamp'] = timestamp
-                        frame['_mock'] = False
-                        self.buffer.append(frame)
-                        self._record_stats('text_lines', 1)
+                if text_results and should_process:
+                    # 只取最后一行
+                    frame = text_results[-1]
+                    frame['fan_status'] = self._fan_state
+                    frame['_timestamp'] = timestamp
+                    frame['_mock'] = False
+                    self.buffer.append(frame)
+                    self._record_stats('text_lines', 1)
+                    self._last_frame_time = timestamp
                     time.sleep(0.1)
                     continue
+
+                # 如果没有处理数据但有新数据到达，清空缓冲区防止堆积
+                if not should_process and (parsed_frames or text_results):
+                    byte_buf.clear()
+                    text_buf.clear()
 
             except (serial.SerialException, OSError) as e:
                 print(f'[错误] 串口异常: {e}')
