@@ -26,29 +26,32 @@ _FONT = _CN_FONTS[0]  # tkinter 字体
 
 from serial_handler import init_handler, get_handler, list_serial_ports
 
-# ── 颜色主题（现代深色） ────────────────────────────
+# ── 颜色主题（现代深色 / 分层） ─────────────────────
 C = {
-    'bg':          '#0d1117',
-    'card':        '#161b22',
-    'card_hover':  '#1c2333',
-    'border':      '#30363d',
-    'divider':     '#21262d',
-    'text':        '#e6edf3',
-    'text_dim':    '#8b949e',
-    'text_muted':  '#6e7681',
-    'accent':      '#58a6ff',
-    'green':       '#3fb950',
-    'red':         '#f85149',
-    'orange':      '#d29922',
-    'purple':      '#bc8cff',
-    'pink':        '#f778ba',
+    'bg':             '#0f1419',
+    'card':           '#1a1f2b',
+    'card_hover':     '#222a38',
+    'card_border':    '#2a3346',
+    'card_border_hi': '#3d4a60',
+    'divider':        '#1c222d',
+    'text':           '#e8ecf2',
+    'text_strong':    '#f5f7fa',
+    'text_dim':       '#8a94a6',
+    'text_muted':     '#5c6370',
+    'accent':         '#4f8cff',
+    'accent_hover':   '#4078e0',
+    'green':          '#4caf50',
+    'red':            '#ef5350',
+    'orange':         '#f5a623',
+    'purple':         '#a084ff',
+    'pink':           '#f472b6',
 
-    'temp':        '#ff6b6b',
-    'humi':        '#4ecdc4',
-    'light':       '#ffd93d',
+    'temp':           '#ff6b6b',
+    'humi':           '#4ecdc4',
+    'light':          '#ffd93d',
 
-    'chart_grid':  '#21262d',
-    'chart_bg':    '#0d1117',
+    'chart_bg':       '#1a1f2b',
+    'chart_grid':     '#2a3346',
 }
 
 # ── 传感器配置 ──────────────────────────────────────
@@ -73,14 +76,17 @@ def _round_rect(canvas, x1, y1, x2, y2, r=12, **kwargs):
 
 
 # ======================================================================
-# 自定义按钮类（圆角 + 悬停效果）
+# 自定义按钮类（圆角 + 边框 + 悬停效果）
 # ======================================================================
 class RoundButton(tk.Canvas):
-    def __init__(self, parent, text='', fg='#fff', bg=C['card'],
+    def __init__(self, parent, text='', fg=None, bg=C['card'],
                  hover_bg=C['card_hover'], accent=C['accent'],
                  command=None, font_size=12, width=160, height=42):
+        if fg is None:
+            fg = C['text']
         super().__init__(parent, width=width, height=height,
-                         bg=C['bg'], highlightthickness=0)
+                         bg=parent['bg'] if isinstance(parent, (tk.Frame, tk.Canvas)) and 'bg' in parent.keys() else C['bg'],
+                         highlightthickness=0)
         self._command = command
         self._bg = bg
         self._hover_bg = hover_bg
@@ -91,34 +97,37 @@ class RoundButton(tk.Canvas):
         self._ww = width
         self._hh = height
 
-        # 左侧彩色装饰条（更醒目）
-        self._accent_id = _round_rect(self, 4, 8, 8, height-8,
-                                       r=3, fill=accent, outline='')
+        # 外层边框（与主色一致的 1px 细线）
+        self._border_id = _round_rect(self, 1, 1, width - 1, height - 1,
+                                       r=8, fill=accent, outline='')
 
-        # 背景
-        self._bg_id = _round_rect(self, 2, 2, width-2, height-2,
-                                  r=8, fill=bg, outline='')
+        # 背景（内缩 1px 制造边框感）
+        self._bg_id = _round_rect(self, 2, 2, width - 2, height - 2,
+                                  r=7, fill=bg, outline='')
+
+        # 左侧彩色装饰条（与 accent 一致，细边）
+        self._accent_id = _round_rect(self, 2, 6, 6, height - 6,
+                                       r=2, fill=accent, outline='')
 
         # 文字（居中）
-        self._text_id = self.create_text(width//2, height//2,
-                                         text=text, fill=fg,
-                                         font=self._font)
+        self._text_id = self.create_text(width // 2, height // 2,
+                                        text=text, fill=fg,
+                                        font=(_FONT, font_size, 'bold'))
 
-        # 事件绑定
-        self.tag_bind(self._bg_id, '<Enter>', self._on_enter)
-        self.tag_bind(self._text_id, '<Enter>', self._on_enter)
-        self.tag_bind(self._bg_id, '<Leave>', self._on_leave)
-        self.tag_bind(self._text_id, '<Leave>', self._on_leave)
-        self.tag_bind(self._bg_id, '<Button-1>', self._on_click)
-        self.tag_bind(self._text_id, '<Button-1>', self._on_click)
+        # 事件绑定（绑定到整个 canvas，避免点击死角）
+        self.bind('<Enter>', self._on_enter)
+        self.bind('<Leave>', self._on_leave)
+        self.bind('<Button-1>', self._on_click)
 
         self.configure(cursor='hand2')
 
     def _on_enter(self, event):
         self.itemconfig(self._bg_id, fill=self._hover_bg)
+        self.itemconfig(self._border_id, fill=self._accent)
 
     def _on_leave(self, event):
         self.itemconfig(self._bg_id, fill=self._bg)
+        self.itemconfig(self._border_id, fill=self._accent)
 
     def _on_click(self, event):
         if self._command:
@@ -131,6 +140,7 @@ class RoundButton(tk.Canvas):
     def set_accent(self, color):
         self._accent = color
         self.itemconfig(self._accent_id, fill=color)
+        self.itemconfig(self._border_id, fill=color)
 
 
 # ======================================================================
@@ -187,35 +197,56 @@ class SmartGreenhouseApp:
     # ── 顶栏 ─────────────────────────────────────
     def _build_header(self, parent):
         frame = tk.Frame(parent, bg=C['bg'])
-        frame.pack(fill='x', pady=(0, 18))
+        frame.pack(fill='x', pady=(0, 20))
 
-        # 标题 + 图标
-        icon = tk.Label(frame, text='  🌿', font=(_FONT, 22),
-                        bg=C['bg'], fg=C['green'])
-        icon.pack(side='left')
+        # 左侧彩色标识条
+        bar = tk.Canvas(frame, width=4, height=56, bg=C['bg'], highlightthickness=0)
+        bar.pack(side='left', padx=(0, 14))
+        bar.create_rectangle(0, 0, 4, 56, fill=C['green'], outline='')
 
-        title = tk.Label(frame, text='智能温室监控系统', font=(_FONT, 18, 'bold'),
-                         bg=C['bg'], fg=C['text'])
-        title.pack(side='left', padx=(4, 0))
+        # 标题区域（两行：大标题 + 副标题）
+        title_wrap = tk.Frame(frame, bg=C['bg'])
+        title_wrap.pack(side='left')
 
-        # 版本
-        ver = tk.Label(frame, text='v1.0', font=(_FONT, 9),
+        title = tk.Label(title_wrap, text='智能温室监控系统',
+                         font=(_FONT, 18, 'bold'),
+                         bg=C['bg'], fg=C['text_strong'])
+        title.pack(anchor='w')
+
+        sub = tk.Label(title_wrap, text='Smart Greenhouse Monitor · 实时环境数据与设备控制',
+                       font=(_FONT, 10),
                        bg=C['bg'], fg=C['text_muted'])
-        ver.pack(side='left', padx=(8, 0), pady=(6, 0))
+        sub.pack(anchor='w', pady=(2, 0))
 
-        # 右侧: 连接状态
+        # 版本 badge
+        ver_label = tk.Label(frame, text=' v1.0 ',
+                            font=(_FONT, 9, 'bold'),
+                            bg=C['card'], fg=C['text_muted'])
+        ver_label.pack(side='left', padx=16, pady=(20, 0))
+
+        # 右侧: 连接状态 pill
         status_frame = tk.Frame(frame, bg=C['bg'])
         status_frame.pack(side='right')
 
-        self._status_dot = tk.Canvas(status_frame, width=10, height=10,
-                                     bg=C['bg'], highlightthickness=0)
-        self._status_dot.pack(side='left', padx=(0, 6))
-        self._dot_id = self._status_dot.create_oval(1, 1, 9, 9,
+        # 状态 pill 容器
+        pill_canvas = tk.Canvas(status_frame, width=200, height=38,
+                               bg=C['bg'], highlightthickness=0)
+        pill_canvas.pack(pady=(8, 0))
+        _round_rect(pill_canvas, 0, 0, 200, 38, r=19,
+                     fill=C['card'], outline='')
+
+        # 状态指示圆点
+        self._status_dot = tk.Canvas(pill_canvas, width=12, height=12,
+                                     bg=C['card'], highlightthickness=0)
+        self._status_dot.place(x=12, y=13)
+        self._dot_id = self._status_dot.create_oval(1, 1, 11, 11,
                                                      fill=C['orange'], outline='')
 
-        self.status_label = tk.Label(status_frame, text='连接中...',
-                                     font=(_FONT, 10), bg=C['bg'], fg=C['orange'])
-        self.status_label.pack(side='left')
+        # 状态文字
+        self.status_label = tk.Label(pill_canvas, text='等待连接',
+                                     font=(_FONT, 10, 'bold'),
+                                     bg=C['card'], fg=C['orange'])
+        self.status_label.place(x=32, y=10)
 
     # ── 传感器卡片 ────────────────────────────────
     def _build_cards(self, parent):
@@ -234,62 +265,50 @@ class SmartGreenhouseApp:
 
     def _make_card(self, parent, cfg):
         color = cfg['color']
-        
-        # 外框（带阴影效果）
+
+        # 卡片外框（双层边框，模拟投影感）
         outer = tk.Frame(parent, bg=C['bg'], bd=0)
-        
-        # 阴影层
-        shadow = tk.Canvas(outer, width=380, height=160,
-                          bg=C['bg'], highlightthickness=0, bd=0)
-        shadow.pack(fill='both', expand=True, padx=2, pady=2)
-        
-        # 绘制阴影
-        shadow.create_rectangle(8, 8, 388, 168, fill='#000000', stipple='gray25')
-        
-        # 主卡片画布
-        canvas = tk.Canvas(shadow, width=380, height=160,
-                          bg=C['card'], highlightthickness=0, bd=0)
-        canvas.place(x=0, y=0)
-        
-        # 顶部彩色装饰条（渐变效果）
-        for i in range(6):
-            alpha = 1.0 - i * 0.15
-            r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
-            r = int(r * alpha)
-            g = int(g * alpha)
-            b = int(b * alpha)
-            tint = f'#{r:02x}{g:02x}{b:02x}'
-            canvas.create_rectangle(0, i, 400, i+1, fill=tint, outline='')
-        
-        # 图标背景圆
-        icon_bg = canvas.create_oval(18, 18, 58, 58, fill=color, outline='')
-        canvas.itemconfig(icon_bg, stipple='gray50')
-        
+        outer.configure(highlightbackground=C['card_border_hi'], highlightthickness=0)
+
+        canvas = tk.Canvas(outer, width=360, height=150,
+                          bg=C['card'], highlightthickness=1,
+                          highlightbackground=C['card_border'])
+        canvas.pack(fill='both', expand=True, padx=0, pady=0)
+
+        # 顶部彩色装饰条（4px 渐变）
+        canvas.create_rectangle(0, 0, 360, 4, fill=color, outline='')
+        canvas.create_rectangle(0, 4, 360, 6, fill=color, outline='')
+
+        # 图标背景圆（半透明填充，纯色圆+内阴影感）
+        canvas.create_oval(20, 18, 66, 64, fill=color, outline='')
+
         # 图标
-        canvas.create_text(38, 38, text=cfg['icon'],
-                          font=(_FONT, 18), anchor='center', fill='#ffffff')
-        
-        # 标签
-        canvas.create_text(70, 30, text=cfg['label'],
-                          font=(_FONT, 12, 'bold'), anchor='w', fill=C['text_dim'])
-        
-        # 大数值
-        val_id = canvas.create_text(30, 85, text='--',
+        canvas.create_text(43, 41, text=cfg['icon'],
+                          font=(_FONT, 20), anchor='center', fill='#ffffff')
+
+        # 标签（在图标右侧，大字号）
+        canvas.create_text(78, 26, text=cfg['label'],
+                          font=(_FONT, 13, 'bold'), anchor='w', fill=C['text_strong'])
+        canvas.create_text(78, 48, text='real-time',
+                          font=(_FONT, 9), anchor='w', fill=C['text_muted'])
+
+        # 大数值（左对齐，放大字号 40）
+        val_id = canvas.create_text(28, 100, text='--',
                                    font=(_FONT, 42, 'bold'),
-                                   anchor='w', fill=C['text'])
-        
-        # 单位
-        unit_id = canvas.create_text(220, 95, text=cfg['unit'],
-                                    font=(_FONT, 14),
+                                   anchor='w', fill=C['text_strong'])
+
+        # 单位（数值右侧
+        unit_id = canvas.create_text(250, 105, text=cfg['unit'],
+                                    font=(_FONT, 14, 'bold'),
                                     anchor='w', fill=C['text_dim'])
-        
-        # 状态指示（带背景）
-        status_bg = canvas.create_rectangle(20, 130, 120, 150, 
-                                           fill=color, outline='', stipple='gray25')
-        status_id = canvas.create_text(70, 140, text='等待数据...',
+
+        # 状态 pill（底部）
+        status_bg = _round_rect(canvas, 22, 128, 22 + 110, 146,
+                                  r=8, fill=color, outline='')
+        status_id = canvas.create_text(77, 137, text='等待数据...',
                                       font=(_FONT, 10, 'bold'),
                                       anchor='center', fill='#ffffff')
-        
+
         return {
             'frame': outer,
             'val_id': val_id,
@@ -301,64 +320,69 @@ class SmartGreenhouseApp:
         }
 
     def _make_control_card(self, parent):
-        outer = tk.Frame(parent, bg=C['bg'], bd=0)
-        
-        shadow = tk.Canvas(outer, width=380, height=160,
-                          bg=C['bg'], highlightthickness=0, bd=0)
-        shadow.pack(fill='both', expand=True, padx=2, pady=2)
-        shadow.create_rectangle(8, 8, 388, 168, fill='#000000', stipple='gray25')
-        
-        canvas = tk.Canvas(shadow, width=380, height=160,
-                          bg=C['card'], highlightthickness=0, bd=0)
-        canvas.place(x=0, y=0)
-        
         color = C['purple']
-        for i in range(6):
-            alpha = 1.0 - i * 0.15
-            r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
-            r = int(r * alpha)
-            g = int(g * alpha)
-            b = int(b * alpha)
-            tint = f'#{r:02x}{g:02x}{b:02x}'
-            canvas.create_rectangle(0, i, 400, i+1, fill=tint, outline='')
-        
-        canvas.create_text(38, 38, text='⚙',
-                          font=(_FONT, 18), anchor='center', fill='#ffffff')
-        canvas.create_text(70, 30, text='设备控制',
-                          font=(_FONT, 12, 'bold'), anchor='w', fill=C['text_dim'])
 
-        btn_frame = tk.Frame(canvas, bg=C['card'])
-        btn_frame.place(x=20, y=60, width=340, height=80)
+        outer = tk.Frame(parent, bg=C['bg'], bd=0)
+        outer.configure(highlightthickness=0)
 
-        self.fan_btn = RoundButton(btn_frame, text='🔛 风扇: 关闭',
+        canvas = tk.Canvas(outer, width=360, height=150,
+                          bg=C['card'], highlightthickness=1,
+                          highlightbackground=C['card_border'])
+        canvas.pack(fill='both', expand=True, padx=0, pady=0)
+
+        # 顶部彩色装饰条（与传感器卡片一致）
+        canvas.create_rectangle(0, 0, 360, 4, fill=color, outline='')
+        canvas.create_rectangle(0, 4, 360, 6, fill=color, outline='')
+
+        # 图标背景圆
+        canvas.create_oval(20, 18, 66, 64, fill=color, outline='')
+
+        # 图标
+        canvas.create_text(43, 41, text='⚙',
+                          font=(_FONT, 20), anchor='center', fill='#ffffff')
+
+        # 标签
+        canvas.create_text(78, 26, text='设备控制',
+                          font=(_FONT, 13, 'bold'), anchor='w', fill=C['text_strong'])
+        canvas.create_text(78, 48, text='relay',
+                          font=(_FONT, 9), anchor='w', fill=C['text_muted'])
+
+        # 控制按钮区域（2 按钮并列）
+        fan_wrap = tk.Frame(canvas, bg=C['card'])
+        fan_wrap.place(x=10, y=72)
+
+        self.fan_btn = RoundButton(fan_wrap, text='🔛 风扇: 关闭',
                                    bg=C['bg'], hover_bg=C['card_hover'],
-                                   accent=C['purple'], fg=C['text'],
+                                   accent=C['purple'], fg=C['text_strong'],
                                    command=self._toggle_fan,
-                                   font_size=13, width=150, height=44)
-        self.fan_btn.pack(side='left', padx=(0, 10))
+                                   font_size=12, width=150, height=44)
+        self.fan_btn.pack(side='left', padx=(10, 6))
 
-        self.fan_dot = tk.Canvas(btn_frame, width=12, height=12,
+        self.fan_dot = tk.Canvas(fan_wrap, width=14, height=14,
                                  bg=C['card'], highlightthickness=0)
-        self.fan_dot.pack(side='left', padx=(0, 10))
-        self._fd_off = self.fan_dot.create_oval(1, 1, 11, 11,
+        self.fan_dot.pack(side='left', padx=(0, 0), pady=14)
+        self._fd_off = self.fan_dot.create_oval(1, 1, 13, 13,
                                                 fill=C['text_muted'], outline='')
-        self._fd_on = self.fan_dot.create_oval(1, 1, 11, 11,
+        self._fd_on = self.fan_dot.create_oval(1, 1, 13, 13,
                                                fill=C['green'], outline='',
                                                state='hidden')
 
-        self.led_btn = RoundButton(btn_frame, text='💡 灯光: 关闭',
-                                   bg=C['bg'], hover_bg=C['card_hover'],
-                                   accent=C['orange'], fg=C['text'],
-                                   command=self._toggle_led,
-                                   font_size=13, width=150, height=44)
-        self.led_btn.pack(side='left')
+        led_wrap = tk.Frame(canvas, bg=C['card'])
+        led_wrap.place(x=180, y=72)
 
-        self.led_dot = tk.Canvas(btn_frame, width=12, height=12,
+        self.led_btn = RoundButton(led_wrap, text='💡 灯光: 关闭',
+                                   bg=C['bg'], hover_bg=C['card_hover'],
+                                   accent=C['orange'], fg=C['text_strong'],
+                                   command=self._toggle_led,
+                                   font_size=12, width=150, height=44)
+        self.led_btn.pack(side='left', padx=(0, 6))
+
+        self.led_dot = tk.Canvas(led_wrap, width=14, height=14,
                                  bg=C['card'], highlightthickness=0)
-        self.led_dot.pack(side='left')
-        self._ld_off = self.led_dot.create_oval(1, 1, 11, 11,
+        self.led_dot.pack(side='left', padx=0, pady=14)
+        self._ld_off = self.led_dot.create_oval(1, 1, 13, 13,
                                                 fill=C['text_muted'], outline='')
-        self._ld_on = self.led_dot.create_oval(1, 1, 11, 11,
+        self._ld_on = self.led_dot.create_oval(1, 1, 13, 13,
                                                fill=C['orange'], outline='',
                                                state='hidden')
 
@@ -367,103 +391,104 @@ class SmartGreenhouseApp:
     # ── 控制栏 ─────────────────────────────────
     def _build_controls(self, parent):
         frame = tk.Frame(parent, bg=C['bg'])
-        frame.pack(fill='x', pady=(0, 12))
+        frame.pack(fill='x', pady=16)
 
-        # ── 端口选择区 ─────────────────────────────
+        # ── 左侧：端口选择区 ───────────────────────
         port_frame = tk.Frame(frame, bg=C['bg'])
-        port_frame.pack(side='left', padx=(0, 16))
-
-        port_label = tk.Label(port_frame, text='端口:',
-                             font=(_FONT, 11), bg=C['bg'], fg=C['text_dim'])
-        port_label.pack(side='left', padx=(0, 6))
+        port_frame.pack(side='left')
 
         # 端口下拉框
         self._port_var = tk.StringVar()
         self._port_combo = ttk.Combobox(port_frame, textvariable=self._port_var,
-                                         font=(_FONT, 11), width=40,
+                                         font=(_FONT, 11), width=38,
                                          state='readonly')
-        self._port_combo.pack(side='left', padx=(0, 8))
+        self._port_combo.pack(side='left', padx=(0, 10))
 
         # 刷新按钮
-        self._refresh_btn = RoundButton(port_frame, text='🔄 刷新',
+        self._refresh_btn = RoundButton(port_frame, text='🔄 刷新端口',
                                         bg=C['card'], hover_bg=C['card_hover'],
-                                        accent=C['accent'], fg=C['text'],
+                                        accent=C['accent'], fg=C['text_strong'],
                                         command=self._on_refresh_ports,
-                                        font_size=11, width=90, height=40)
-        self._refresh_btn.pack(side='left', padx=(0, 6))
+                                        font_size=11, width=110, height=40)
+        self._refresh_btn.pack(side='left', padx=(0, 8))
 
-        # 连接按钮
+        # 连接按钮（更突出，绿色）
         self._connect_btn = RoundButton(port_frame, text='🔗 连接',
-                                        bg=C['accent'], hover_bg='#4c9aed',
-                                        accent=C['green'], fg='#fff',
-                                        command=self._on_connect_click,
-                                        font_size=12, width=100, height=42)
-        self._connect_btn.pack(side='left', padx=(0, 6))
+                                       bg=C['accent'], hover_bg=C['accent_hover'],
+                                       accent=C['green'], fg=C['text_strong'],
+                                       command=self._on_connect_click,
+                                       font_size=11, width=110, height=40)
+        self._connect_btn.pack(side='left', padx=(0, 8))
 
-        # Mock 模式切换按钮
+        # 模拟模式按钮
         self._mock_btn = RoundButton(port_frame, text='🎭 模拟',
-                                     bg=C['card'], hover_bg=C['card_hover'],
-                                     accent=C['orange'], fg=C['text'],
-                                     command=self._on_mock_click,
-                                     font_size=11, width=90, height=40)
-        self._mock_btn.pack(side='left', padx=(6, 0))
+                                      bg=C['card'], hover_bg=C['card_hover'],
+                                      accent=C['orange'], fg=C['text_strong'],
+                                      command=self._on_mock_click,
+                                      font_size=11, width=110, height=40)
+        self._mock_btn.pack(side='left', padx=0)
 
         # ── 右侧：清空数据 ───────────────────────
         right_frame = tk.Frame(frame, bg=C['bg'])
         right_frame.pack(side='right')
 
-        # 清空数据
         self.clear_btn = RoundButton(right_frame, text='🗑 清空数据',
                                      bg=C['card'], hover_bg=C['card_hover'],
-                                     accent=C['red'], fg=C['text'],
+                                     accent=C['red'], fg=C['text_strong'],
                                      command=self._clear_data,
-                                     font_size=12, width=150, height=42)
+                                     font_size=11, width=130, height=40)
         self.clear_btn.pack(side='left', padx=(12, 0))
 
     # ── 图表区 ─────────────────────────────────
     def _build_charts(self, parent):
         container = tk.Frame(parent, bg=C['bg'])
-        container.pack(fill='both', expand=True, pady=(0, 8))
+        container.pack(fill='both', expand=True, pady=(8, 12))
 
         self.figures = {}
         titles = [
-            ('🌡 温度趋势', 'temperature', C['temp'], '°C'),
-            ('💧 湿度趋势', 'humidity', C['humi'], '%'),
+            ('温度趋势 (°C)', 'temperature', C['temp'], '°C'),
+            ('湿度趋势 (%)', 'humidity', C['humi'], '%'),
         ]
 
         for title, key, color, unit in titles:
             row = tk.Frame(container, bg=C['bg'])
-            row.pack(fill='both', expand=True, pady=3)
+            row.pack(fill='both', expand=True, pady=8)
 
-            fig = Figure(figsize=(8, 1.6), dpi=92)
+            fig = Figure(figsize=(10, 2.4), dpi=100)
             fig.patch.set_facecolor(C['chart_bg'])
 
             ax = fig.add_subplot(111)
             ax.set_facecolor(C['chart_bg'])
 
-            # 标题
-            ax.set_title(title, color=C['text_dim'], fontsize=8.5,
-                         fontfamily=_FONT, pad=5, loc='left')
-            ax.set_ylabel(unit, color=C['text_muted'], fontsize=7,
-                          fontfamily=_FONT, labelpad=1)
+            # 标题 - 现代粗体
+            ax.set_title(title, color=C['text_strong'], fontsize=11,
+                         fontweight='bold', pad=8, loc='left')
+            ax.set_ylabel(unit, color=C['text_dim'], fontsize=9,
+                          labelpad=6)
 
-            # 移除上右 spine
+            # 美化 spines
             ax.spines['top'].set_visible(False)
             ax.spines['right'].set_visible(False)
-            ax.spines['left'].set_color(C['divider'])
-            ax.spines['left'].set_linewidth(0.5)
-            ax.spines['bottom'].set_color(C['divider'])
-            ax.spines['bottom'].set_linewidth(0.5)
+            ax.spines['left'].set_color(C['card_border'])
+            ax.spines['left'].set_linewidth(0.7)
+            ax.spines['bottom'].set_color(C['card_border'])
+            ax.spines['bottom'].set_linewidth(0.7)
 
-            ax.tick_params(colors=C['text_muted'], labelsize=6.5)
-            ax.grid(True, alpha=0.3, color=C['chart_grid'], linewidth=0.4)
+            # 美化刻度
+            ax.tick_params(colors=C['text_muted'], labelsize=8,
+                          length=3, width=0.5)
 
-            # 渐变填充
-            line, = ax.plot([], [], color=color, linewidth=1.6,
-                            antialiased=True, alpha=0.95)
-            ax.fill_between([], [], alpha=0.08, color=color)
+            # 更细腻的网格线
+            ax.grid(True, alpha=0.25, color=C['card_border'],
+                   linewidth=0.5, linestyle='--')
+
+            # 平滑曲线 + 半透明填充
+            line, = ax.plot([], [], color=color, linewidth=2.2,
+                           antialiased=True, alpha=0.95)
+            ax.fill_between([], [], alpha=0.12, color=color)
             self._fill_collection = None
 
+            # Y 轴自适应
             ax.set_xlim(0, 60)
             ax.set_ylim(0, 100)
 
@@ -479,14 +504,23 @@ class SmartGreenhouseApp:
     # ── 底部状态栏 ─────────────────────────────
     def _build_statusbar(self, parent):
         frame = tk.Frame(parent, bg=C['bg'])
-        frame.pack(fill='x', pady=(6, 0))
+        frame.pack(fill='x', pady=(8, 0))
 
-        self.time_label = tk.Label(frame, text='等待传感器数据...',
-                                   font=(_FONT, 9), bg=C['bg'], fg=C['text_muted'])
+        # 顶部分隔细线
+        sep = tk.Frame(frame, height=1, bg=C['card_border'])
+        sep.pack(fill='x', side='top')
+
+        status_wrap = tk.Frame(frame, bg=C['bg'])
+        status_wrap.pack(fill='x', pady=(8, 0))
+
+        self.time_label = tk.Label(status_wrap, text='等待传感器数据...',
+                                   font=(_FONT, 10),
+                                   bg=C['bg'], fg=C['text_muted'])
         self.time_label.pack(side='left')
 
-        self.count_label = tk.Label(frame, text='',
-                                    font=(_FONT, 9), bg=C['bg'], fg=C['text_muted'])
+        self.count_label = tk.Label(status_wrap, text='',
+                                    font=(_FONT, 10),
+                                    bg=C['bg'], fg=C['text_muted'])
         self.count_label.pack(side='right')
 
     # ── 端口控制 ─────────────────────────────────
