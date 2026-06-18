@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Knowledge Base</title>
 <link rel="stylesheet" href="/static/style.css">
-<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js" defer></script>
 </head>
 <body>
 
@@ -32,7 +32,8 @@
     <div class="header-logo">📚 Knowledge Base</div>
     <div class="header-actions">
       <button class="header-btn" id="darkModeBtn" title="切换明暗主题">🌙</button>
-      <button class="header-btn" id="graphToggleBtn" onclick="toggleGraph()" title="知识图谱">📊</button>
+      <button class="header-btn" id="stockChartBtn" onclick="toggleStockChart()" title="股票走势图">📈</button>
+      <button class="header-btn" id="adminBtn" onclick="showAdminModal()" title="管理员入口">🔐</button>
       <a href="/logout" style="color:var(--text-muted);font-size:var(--font-size-sm);margin-left:var(--space-sm);text-decoration:none">退出</a>
     </div>
   </header>
@@ -102,19 +103,22 @@
       <!-- Output Area -->
       <div id="output" style="margin-top:var(--space-lg)"></div>
 
-      <!-- Knowledge Graph Panel -->
-      <div id="graphPanel" style="display:none;margin-top:var(--space-lg);flex-direction:column;gap:var(--space-sm)">
+      <!-- Stock Chart Panel -->
+      <div id="stockChartPanel" style="display:none;margin-top:var(--space-lg);flex-direction:column;gap:var(--space-sm)">
         <div style="display:flex;gap:var(--space-sm);align-items:center">
-          <input type="text" id="graphSearch" class="graph-search-input" placeholder="🔍 搜索图谱节点..." style="flex:1;padding:8px 12px;border:1px solid var(--border-color);border-radius:var(--border-radius);background:var(--bg-input);color:var(--text-primary);outline:none">
-          <button id="graphExportBtn" class="graph-btn" title="导出图片">📷</button>
-          <button class="graph-btn" onclick="resetGraph()" title="重置视图">⟳</button>
+          <select id="stockChartType" class="chart-type-select" onchange="switchStockChartType()">
+            <option value="index">📊 大盘指数走势</option>
+            <option value="watchlist">⭐ 自选股对比</option>
+          </select>
+          <select id="stockChartPeriod" class="chart-type-select" onchange="renderStockChart()">
+            <option value="today">今日</option>
+            <option value="5d">近5日</option>
+          </select>
+          <button class="graph-btn" onclick="renderStockChart()" title="刷新">⟳</button>
         </div>
-        <div id="graphContainer" class="graph-container"></div>
-        <div class="graph-legend">
-          <div class="graph-legend-item"><span class="graph-legend-dot" style="background:#6c63ff"></span>概念</div>
-          <div class="graph-legend-item"><span class="graph-legend-dot" style="background:#00d4aa"></span>实体</div>
-          <div class="graph-legend-item"><span class="graph-legend-dot" style="background:#ff9f43"></span>来源</div>
-          <div class="graph-legend-item"><span class="graph-legend-dot" style="background:#888"></span>其他</div>
+        <div id="stockChartContainer" class="graph-container" style="height:480px"></div>
+        <div class="graph-legend" id="stockChartLegend">
+          <span style="font-size:12px;color:var(--text-muted)">加载中...</span>
         </div>
       </div>
 
@@ -123,15 +127,14 @@
         <div class="market-header-bar">
           <div class="market-header-row">
             <div class="market-title">📊 行情面板</div>
-            <span class="market-refresh-hint">每30秒自动刷新</span>
+            <span class="market-refresh-hint"></span>
           </div>
-          <div class="market-tabs">
+          <div class="market-tabs" id="marketTabs">
             <button class="market-tab active" data-tab="indices">📊指数行情</button>
             <button class="market-tab" data-tab="sectors">📈板块对比</button>
             <button class="market-tab" data-tab="limitup">🔥涨停板</button>
             <button class="market-tab" data-tab="abnormal">⚡异动监控</button>
             <button class="market-tab" data-tab="pick">🧠AI荐股</button>
-          <button class="market-tab" data-tab="learn">🧠 学习中心</button>
           </div>
         </div>
         <div class="market-panels">
@@ -174,6 +177,14 @@
                 <div class="learn-section-title">📋 偏好规则</div>
                 <div class="learn-prefs" id="learnPrefs">
                   <div class="learn-empty">暂无偏好规则，提交几次修正后自动提取</div>
+                </div>
+              </div>
+              <!-- 访问日志（管理员） -->
+              <div class="learn-section">
+                <div class="learn-section-title">📋 访问日志 <button class="learn-add-pref-btn" onclick="loadAccessLog()" style="margin-left:auto">⟳ 刷新</button></div>
+                <div class="log-stats" id="logStats" style="font-size:12px;color:var(--text-muted);margin-bottom:6px"></div>
+                <div class="log-viewer" id="logViewer" style="background:#0d0d1a;border:1px solid var(--border);border-radius:8px;padding:12px;max-height:400px;overflow-y:auto;font-family:monospace;font-size:11px;line-height:1.5;color:#aaa;white-space:pre-wrap;word-break:break-all">
+                  <span style="color:var(--text-muted)">点击刷新加载...</span>
                 </div>
               </div>
               <!-- 记忆列表 -->
@@ -226,7 +237,7 @@
       </div>
       <div class="feedback-footer">
         <span>📊 已收集 <span id="fbSessionCount">0</span> 条</span>
-        <a href="#" onclick="showLearnTab(event)" class="feedback-link">➡ 学习中心</a>
+        <a href="#" onclick="showLearnTab(event)" class="feedback-link" style="display:none">➡ 学习中心</a>
       </div>
       <div class="feedback-auto-toggle">
         <label class="learn-toggle" style="font-size:var(--font-size-xs)">
@@ -235,6 +246,25 @@
           <span class="learn-toggle-slider"></span>
         </label>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 管理员密码弹窗 ===== -->
+<div id="adminModal" class="modal-overlay" style="display:none">
+  <div class="modal-card">
+    <div class="modal-header">
+      <span>🔐 管理员验证</span>
+      <button class="modal-close" onclick="hideAdminModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">访问学习中心需验证管理员身份</p>
+      <input type="password" id="adminPwd" class="form-input" placeholder="输入管理员密码" autofocus>
+      <div class="modal-error" id="adminError" style="display:none"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="modal-btn-cancel" onclick="hideAdminModal()">取消</button>
+      <button class="modal-btn-confirm" onclick="verifyAdmin()">验证</button>
     </div>
   </div>
 </div>

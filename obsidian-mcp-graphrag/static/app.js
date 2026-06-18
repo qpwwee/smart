@@ -502,149 +502,280 @@ async function sendVideoFrames() {
   }
 }
 
-// ─── Knowledge Graph ───────────────────────────────────────
-function toggleGraph() {
-  const panel = document.getElementById('graphPanel');
+// ─── Stock Chart ──────────────────────────────────────────
+let stockChart = null;
+let isAdmin = false;
+
+function toggleStockChart() {
+  const panel = document.getElementById('stockChartPanel');
   if (!panel) return;
   const show = panel.style.display === 'none' || !panel.style.display;
   panel.style.display = show ? 'flex' : 'none';
-  if (show) loadGraph();
+  if (show) renderStockChart();
 }
 
-async function loadGraph() {
-  const container = document.getElementById('graphContainer');
+function switchStockChartType() {
+  renderStockChart();
+}
+
+async function renderStockChart() {
+  const container = document.getElementById('stockChartContainer');
   if (!container) return;
+  const chartType = document.getElementById('stockChartType')?.value || 'index';
+  const period = document.getElementById('stockChartPeriod')?.value || 'today';
+
+  if (!stockChart) {
+    stockChart = echarts.init(container);
+    window.addEventListener('resize', () => stockChart && stockChart.resize());
+  }
+
+  // Show loading
+  stockChart.showLoading({ text: '加载行情...', color: '#6c63ff' });
 
   try {
-    const res = await fetch('/api/graph');
+    const res = await fetch('/market');
     const data = await res.json();
+    stockChart.hideLoading();
 
-    if (!graphChart) {
-      graphChart = echarts.init(container);
-      window.addEventListener('resize', () => graphChart && graphChart.resize());
+    if (chartType === 'index') {
+      renderIndexChart(data);
+    } else if (chartType === 'watchlist') {
+      renderWatchlistChart(data);
     }
-
-    renderGraph(data);
   } catch (e) {
-    container.innerHTML = `<div class="error-msg">图谱加载失败: ${esc(e.message)}</div>`;
+    stockChart.hideLoading();
+    container.innerHTML = `<div class="error-msg">行情加载失败</div>`;
   }
 }
 
-function renderGraph(data) {
-  if (!graphChart) return;
+function renderIndexChart(data) {
+  const indices = data.indices || [];
+  if (!indices.length) {
+    document.getElementById('stockChartLegend').innerHTML = '<span style="font-size:12px;color:var(--text-muted)">暂无数据</span>';
+    stockChart.setOption({ title: { text: '暂无指数数据', left: 'center', top: 'center', textStyle: { color: '#666' } } });
+    return;
+  }
 
-  // Backend returns {nodes: [{id, name, symbolSize, category, itemStyle}], edges: [{source, target, label}]}
-  const nodes = (data.nodes || []).map(n => ({
-    id: n.id || n.name,
-    name: n.name || n.id,
-    symbolSize: Math.max(6, n.symbolSize || 10),
-    category: n.category || 'unknown',
-    itemStyle: n.itemStyle || { color: getCategoryColor(n.category) },
-    label: { show: false }
-  }));
-
-  const edges = (data.edges || []).map(e => ({
-    source: e.source || e.from,
-    target: e.target || e.to,
-    label: e.label || { show: false }
-  }));
-
-  const catSet = {};
-  nodes.forEach(n => { if (!catSet[n.category]) catSet[n.category] = true; });
-  const categories = Object.keys(catSet).map(c => ({
-    name: c,
-    itemStyle: { color: getCategoryColor(c) }
-  }));
-
-  const option = {
-    backgroundColor: '#0d0d1a',
-    tooltip: { trigger: 'item', formatter: '{b}' },
-    animationDuration: 600,
-    animationEasingUpdate: 'cubicInOut',
-    series: [{
-      type: 'graph',
-      layout: 'force',
-      force: { repulsion: 200, edgeLength: [60, 180], gravity: 0.12, layoutAnimation: true, friction: 0.6 },
-      roam: true,
-      draggable: true,
-      data: nodes,
-      edges: edges,
-      lineStyle: { color: 'rgba(255,255,255,0.12)', curveness: 0.2, width: 0.7, opacity: 0.5 },
-      label: { show: false },
-      emphasis: {
-        focus: 'adjacency',
-        lineStyle: { width: 1.5, color: 'rgba(255,255,255,0.4)', opacity: 1 },
-        itemStyle: { opacity: 1, borderColor: 'rgba(255,255,255,0.7)', borderWidth: 2 },
-        label: { show: true, fontSize: 12, fontWeight: '600', color: '#fff', backgroundColor: 'rgba(13,13,26,0.9)', padding: [4, 10], borderRadius: 4, distance: 10 }
+  const colors = ['#6c63ff','#00d4aa','#ff6b6b','#ff9f43','#73c0de','#fac858','#91cc75','#ee6666','#9a60b4','#fc8452'];
+  
+  stockChart.setOption({
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(26,26,46,0.95)',
+      borderColor: '#2a2a4a',
+      textStyle: { color: '#e0e0e0' }
+    },
+    legend: {
+      data: indices.map(i => i.name),
+      bottom: 0,
+      textStyle: { color: '#aaa', fontSize: 11 }
+    },
+    grid: { left: '10%', right: '5%', top: '8%', bottom: '14%' },
+    xAxis: {
+      type: 'category',
+      data: ['开盘','10:00','11:00','11:30','13:30','14:00','15:00'],
+      axisLine: { lineStyle: { color: '#2a2a4a' } },
+      axisLabel: { color: '#888', fontSize: 10 }
+    },
+    yAxis: [
+      {
+        type: 'value',
+        name: '涨跌幅%',
+        nameTextStyle: { color: '#888' },
+        axisLabel: { color: '#888', formatter: '{value}%' },
+        splitLine: { lineStyle: { color: '#222' } }
       },
-      blur: { itemStyle: { opacity: 0.08 }, lineStyle: { opacity: 0.02 }, label: { show: false } },
-      lineStyle: { color: '#555', width: 1.5, curveness: 0.2 },
-      emphasis: {
-        focus: 'adjacency',
-        lineStyle: { width: 3, color: '#7ec8e3' }
+      {
+        type: 'value',
+        name: '点数',
+        axisLabel: { color: '#888' },
+        splitLine: { show: false }
       }
+    ],
+    series: indices.map((item, i) => ({
+      name: item.name,
+      type: 'line',
+      smooth: true,
+      symbol: 'circle',
+      symbolSize: 4,
+      yAxisIndex: 0,
+      data: _generateIndexTrend(item),
+      lineStyle: { color: colors[i % colors.length], width: 2 },
+      itemStyle: { color: colors[i % colors.length] },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: colors[i % colors.length] + '33' },
+          { offset: 1, color: colors[i % colors.length] + '00' }
+        ])
+      }
+    }))
+  }, true);
+
+  // Legend
+  const chgs = indices.map(i => {
+    const v = parseFloat(i.change_pct);
+    const cls = v >= 0 ? 'up' : 'down';
+    return `<span class="index-change ${cls}">${i.name} ${v >= 0 ? '+' : ''}${v.toFixed(2)}%</span>`;
+  });
+  document.getElementById('stockChartLegend').innerHTML = chgs.join(' &nbsp;|&nbsp; ');
+}
+
+function _generateIndexTrend(item) {
+  const chg = parseFloat(item.change_pct) || 0;
+  const base = parseFloat(item.price) || 3000;
+  const baseOpen = base - chg * base / 100;
+  // Generate synthetic intraday trend based on current change
+  const points = [baseOpen];
+  const steps = 6;
+  const stepSize = chg / steps;
+  for (let i = 1; i <= steps; i++) {
+    const noise = (Math.random() - 0.5) * Math.abs(stepSize) * 0.5;
+    points.push(Number((baseOpen + stepSize * i * base / 100 + noise * base / 100).toFixed(2)));
+  }
+  return points;
+}
+
+function renderWatchlistChart(data) {
+  const wl = getWatchlist();
+  if (!wl.length) {
+    stockChart.setOption({ title: { text: '请先添加自选股', left: 'center', top: 'center', textStyle: { color: '#666' } } });
+    document.getElementById('stockChartLegend').innerHTML = '<span style="font-size:12px;color:var(--text-muted)">暂无自选</span>';
+    return;
+  }
+
+  // Show as bar chart comparing change
+  const names = wl.map(w => w.name);
+  const changes = wl.map(w => parseFloat(w.change) || 0);
+  const colors = changes.map(v => v >= 0
+    ? new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#00d4aa' }, { offset: 1, color: '#00a88a' }])
+    : new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#ff6b6b' }, { offset: 1, color: '#cc4444' }])
+  );
+
+  stockChart.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    grid: { left: '10%', right: '12%', top: '5%', bottom: '8%' },
+    xAxis: { type: 'category', data: names, axisLabel: { color: '#ccc', rotate: 30 } },
+    yAxis: { type: 'value', name: '%', axisLabel: { formatter: '{value}%', color: '#888' }, splitLine: { lineStyle: { color: '#222' } } },
+    series: [{
+      type: 'bar',
+      data: changes.map((v, i) => ({ value: v, itemStyle: { color: colors[i], borderRadius: [6, 6, 0, 0] } })),
+      label: { show: true, position: 'top', formatter: '{c}%', color: '#bbb', fontSize: 11 }
     }]
-  };
+  }, true);
 
-  graphChart.setOption(option, true);
+  document.getElementById('stockChartLegend').innerHTML = `<span style="font-size:12px;color:var(--text-muted)">${wl.length} 只自选股</span>`;
 }
 
-function getCategoryColor(cat) {
-  const palette = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc'];
-  return palette[Number(cat) % palette.length];
+// ─── Admin Modal ───────────────────────────────────────────
+function showAdminModal() {
+  document.getElementById('adminModal').style.display = '';
+  document.getElementById('adminPwd').value = '';
+  document.getElementById('adminError').style.display = 'none';
+  setTimeout(() => document.getElementById('adminPwd').focus(), 100);
 }
 
-function resetGraph() {
-  if (graphChart) graphChart.clear();
-  loadGraph();
+function hideAdminModal() {
+  document.getElementById('adminModal').style.display = 'none';
 }
 
-function filterGraph(keyword) {
-  if (!graphChart) return;
-  const kw = keyword.toLowerCase().trim();
-  const option = graphChart.getOption();
-  const nodes = option.series[0].data || [];
-  const edges = option.series[0].edges || [];
-
-  nodes.forEach(n => {
-    if (!kw) {
-      n.label = { show: true, color: '#ccc', fontSize: 11 };
-      n.itemStyle = { opacity: 1, color: getCategoryColor(n.category || 0) };
-    } else if ((n.name || '').toLowerCase().includes(kw)) {
-      n.label = { show: true, color: '#ffd700', fontSize: 14, fontWeight: 'bold' };
-      n.itemStyle = { opacity: 1, color: '#ffd700', shadowBlur: 10, shadowColor: '#ffd700' };
+function verifyAdmin() {
+  const pwd = document.getElementById('adminPwd').value;
+  if (pwd === 'LINyao') {
+    isAdmin = true;
+    hideAdminModal();
+    // Update admin button
+    const btn = document.getElementById('adminBtn');
+    if (btn) { btn.textContent = '🧠'; btn.style.color = '#ffd700'; btn.style.borderColor = '#ffd700'; }
+    // Show learning center tab
+    const learnTab = document.querySelector('[data-tab="learn"]');
+    if (!learnTab) {
+      const tabs = document.getElementById('marketTabs');
+      if (tabs) {
+        const ltab = document.createElement('button');
+        ltab.className = 'market-tab';
+        ltab.dataset.tab = 'learn';
+        ltab.innerHTML = '🔒 学习中心';
+        tabs.appendChild(ltab);
+      }
     } else {
-      n.label = { show: false };
-      n.itemStyle = { opacity: 0.15, color: getCategoryColor(n.category || 0) };
+      learnTab.style.display = '';
     }
-  });
+    // Also enable learning center link in feedback
+    var link = document.querySelector('.feedback-link');
+    if (link) link.style.display = '';
+  } else {
+    document.getElementById('adminError').style.display = '';
+    document.getElementById('adminError').textContent = '密码错误';
+    document.getElementById('adminPwd').value = '';
+    document.getElementById('adminPwd').focus();
+  }
+}
 
-  edges.forEach(e => {
-    if (!kw) {
-      e.lineStyle = { opacity: 0.6, color: '#555', width: 1.5 };
+// Enter key in admin modal
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && document.getElementById('adminModal').style.display !== 'none') {
+    verifyAdmin();
+  }
+  if (e.key === 'Escape' && document.getElementById('adminModal').style.display !== 'none') {
+    hideAdminModal();
+  }
+});
+
+// ─── Admin Access Log Viewer ────────────────────────────────
+async function loadAccessLog() {
+  const viewer = document.getElementById('logViewer');
+  const stats = document.getElementById('logStats');
+  if (viewer) viewer.innerHTML = '<span style="color:#888">⏳ 加载中...</span>';
+  
+  try {
+    const res = await fetch('/admin/access-log?lines=200');
+    if (res.status === 401) {
+      if (viewer) viewer.innerHTML = '<span style="color:#ff6b6b">❌ 需要先登录</span>';
+      return;
+    }
+    const data = await res.json();
+    
+    // Stats
+    const ips = data.unique_ips || [];
+    const external = ips.filter(([ip]) => ip !== '127.0.0.1' && ip !== '0.0.0.0');
+    if (stats) {
+      stats.innerHTML = `<span>总请求: ${data.total_requests || 0}</span> &nbsp;|&nbsp; <span>唯一IP: ${ips.length}</span>` +
+        (external.length > 0
+          ? ` &nbsp;|&nbsp; <span style="color:#ff6b6b">⚠️ 外部IP: ${external.map(([ip,c]) => ip + '(' + c + ')').join(', ')}</span>`
+          : ` &nbsp;|&nbsp; <span style="color:#00d4aa">✅ 仅本机访问</span>`);
+    }
+    
+    // Web log
+    let html = '<div style="color:#6c63ff;margin-bottom:4px">── Web 服务日志 ──</div>';
+    const webLog = data.web_log || [];
+    if (webLog.length === 0) {
+      html += '<div style="color:#666">（空）</div>';
     } else {
-      const src = (nodes.find(n => n.id === e.source) || {}).name || '';
-      const tgt = (nodes.find(n => n.id === e.target) || {}).name || '';
-      if (src.toLowerCase().includes(kw) || tgt.toLowerCase().includes(kw)) {
-        e.lineStyle = { opacity: 1, color: '#ffd700', width: 3 };
-      } else {
-        e.lineStyle = { opacity: 0.08, color: '#555', width: 1 };
+      for (const line of webLog) {
+        let cls = 'color:#aaa';
+        if (/ERROR|失败|error/i.test(line)) cls = 'color:#ff6b6b';
+        else if (/WARNING|警告/i.test(line)) cls = 'color:#ff9f43';
+        else if (/GET.*200|POST.*200/.test(line)) cls = 'color:#73c0de';
+        else if (/启动|✅|🚀|前端|图谱|引擎|📁|🔑|🤖/.test(line)) cls = 'color:#00d4aa';
+        html += `<div style="${cls}">${esc(line)}</div>`;
       }
     }
-  });
-
-  graphChart.setOption(option, true);
-}
-
-function exportGraphImage() {
-  if (!graphChart) return;
-  const url = graphChart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#1a1a2e' });
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'knowledge-graph.png';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+    
+    // Bore log
+    html += '<div style="color:#6c63ff;margin-top:12px;margin-bottom:4px">── Bore 隧道日志 ──</div>';
+    const boreLog = data.bore_log || [];
+    if (boreLog.length === 0) {
+      html += '<div style="color:#666">（空）</div>';
+    } else {
+      for (const line of boreLog) {
+        html += `<div style="color:#888">${esc(line)}</div>`;
+      }
+    }
+    
+    if (viewer) viewer.innerHTML = html;
+  } catch (e) {
+    if (viewer) viewer.innerHTML = `<span style="color:#ff6b6b">加载失败: ${esc(e.message)}</span>`;
+  }
 }
 
 // ─── Market Data ───────────────────────────────────────────
@@ -1245,19 +1376,15 @@ document.addEventListener('keydown', function(e) {
   renderHistory();
   renderWatchlist();
 
-  // Graph search input
-  const graphSearchInput = document.getElementById('graphSearch');
-  if (graphSearchInput) {
-    let debounceTimer;
-    graphSearchInput.addEventListener('input', function() {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => filterGraph(this.value), 300);
-    });
+  // Stock chart type switch
+  const stockChartType = document.getElementById('stockChartType');
+  if (stockChartType) {
+    stockChartType.addEventListener('change', switchStockChartType);
   }
 
-  const graphExportBtn = document.getElementById('graphExportBtn');
-  if (graphExportBtn) {
-    graphExportBtn.addEventListener('click', exportGraphImage);
+  const stockChartRefresh = document.querySelector('#stockChartPanel .graph-btn');
+  if (stockChartRefresh) {
+    // refresh button already has onclick
   }
 
   const darkModeBtn = document.getElementById('darkModeBtn');
@@ -1289,6 +1416,10 @@ document.addEventListener('keydown', function(e) {
   document.addEventListener('click', function(e) {
     const tab = e.target.closest('.market-tab');
     if (tab && tab.dataset.tab) {
+      if (tab.dataset.tab === 'learn' && !isAdmin) {
+        showAdminModal();
+        return;
+      }
       switchMarketTab(tab.dataset.tab);
     }
   });
@@ -1483,6 +1614,9 @@ document.addEventListener('keydown', function(e) {
       }
     } catch (e) { /* silent */ }
 
+    // Auto load access logs
+    loadAccessLog();
+
     try {
       var prefsR = await fetch('/learn/preferences');
       if (prefsR.ok) {
@@ -1584,6 +1718,10 @@ document.addEventListener('keydown', function(e) {
 
   function showLearnTab(ev) {
     if (ev) ev.preventDefault();
+    if (!isAdmin) {
+      showAdminModal();
+      return;
+    }
     var tabs = document.querySelectorAll('.market-tab');
     for (var i = 0; i < tabs.length; i++) tabs[i].classList.remove('active');
     var learnTab = document.querySelector('[data-tab="learn"]');
@@ -1597,7 +1735,10 @@ document.addEventListener('keydown', function(e) {
   var tabBtns = document.querySelectorAll('.market-tab');
   for (var i = 0; i < tabBtns.length; i++) {
     tabBtns[i].addEventListener('click', function() {
-      if (this.getAttribute('data-tab') === 'learn') loadLearnCenter();
+      if (this.getAttribute('data-tab') === 'learn') {
+        if (!isAdmin) { showAdminModal(); return; }
+        loadLearnCenter();
+      }
     });
   }
 

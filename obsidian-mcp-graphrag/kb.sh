@@ -19,7 +19,7 @@ BORE_SERVER="bore.pub"
 # ====== 配置 ======
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VAULT="/Users/pon/Documents/obsidian- knowledge"
-PORT=8080
+PORT=8081
 PASSWORD="wiki2026"
 LLM_MODEL="qwen/qwen3-vl-4b"
 EMBEDDING_MODEL="qwen3-embedding:4b"

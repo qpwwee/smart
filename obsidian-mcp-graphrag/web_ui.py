@@ -291,6 +291,103 @@ def _ask_llm_raw(system_prompt: str, user_message: str, max_tokens: int = None, 
     return last_error
 
 
+async def _ask_llm_stream_raw(system_prompt: str, user_message: str) -> AsyncGenerator[str, None]:
+    """流式调用 LLM，不注入 KB 上下文，用于知识库未命中时的自主推理"""
+    try:
+        async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
+            async with client.stream(
+                "POST",
+                f"{lm_studio_url}/chat/completions",
+                json={
+                    "model": llm_model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_message},
+                    ],
+                    "max_tokens": LLM_MAX_TOKENS,
+                    "temperature": 0.7,
+                    "stream": True,
+                },
+            ) as resp:
+                if resp.status_code != 200:
+                    yield f'data: {{"type":"error","data":"LLM 返回 {resp.status_code}"}}\n\n'
+                    return
+                async for chunk in resp.aiter_lines():
+                    if not chunk:
+                        continue
+                    if chunk.startswith("data: "):
+                        data_str = chunk[6:]
+                        if data_str.strip() == "[DONE]":
+                            break
+                        try:
+                            data = json.loads(data_str)
+                            choices = data.get("choices", [])
+                            if choices:
+                                delta = choices[0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    yield f'data: {{"type":"token","data":{json.dumps(content)}}}\n\n'
+                        except json.JSONDecodeError:
+                            continue
+    except Exception as e:
+        yield f'data: {{"type":"error","data":{json.dumps(str(e))}}}\n\n'
+
+
+def _schedule_save_if_new(question: str, answer: str, retrieval: dict):
+    """2 秒后将问答写入 Obsidian 知识库（后台线程）"""
+    def _delayed_save():
+        time.sleep(2)
+        try:
+            _save_to_obsidian(question, answer, retrieval.get("source_type", "llm"))
+        except Exception as e:
+            print(f"  ⚠️ 自动保存失败: {e}")
+
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    executor.submit(_delayed_save)
+    print(f"  💾 已调度自动保存（2s 后）: {question[:40]}...")
+
+
+def _save_to_obsidian(question: str, answer: str, source_type: str):
+    """将问答存入 Obsidian 知识库，严格遵守 TheSchema 规范"""
+    vault = "/Users/pon/Documents/obsidian- knowledge"
+    wiki_dir = os.path.join(vault, "wiki", "concepts")
+    os.makedirs(wiki_dir, exist_ok=True)
+
+    # 生成 slug
+    slug = re.sub(r'[^\w\u4e00-\u9fff]+', '-', question[:30]).strip('-')
+    if not slug:
+        slug = str(uuid.uuid4())[:8]
+    today = time.strftime("%Y-%m-%d")
+
+    # 生成标签
+    tags = ["auto-saved", source_type]
+
+    # 构造 frontmatter + 正文
+    note = f"""---
+title: {question[:80]}
+created: {today}
+updated: {today}
+tags: [{', '.join(tags)}]
+source: auto-saved-qa
+type: concept
+---
+
+# {question}
+
+## 回答
+
+{answer}
+
+---
+*此页由 AI 自动生成于 {today}，来源: {source_type}*
+"""
+
+    path = os.path.join(wiki_dir, f"{slug}.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(note)
+    print(f"  ✅ 自动保存到 Obsidian: {path}")
+
+
 def _ask_vision(query: str, image_base64: str, mime_type: str = "image/jpeg", max_tokens: int = None) -> str:
     """调用 LM Studio 本地视觉模型识别图片内容"""
     mt = max_tokens or LLM_MAX_TOKENS
@@ -1103,7 +1200,7 @@ def _do_retrieve(query_text: str) -> dict:
     results.sort(key=lambda x: x.get("score", x.get("relevance", 0)), reverse=True)
     top_results = results[:15]
 
-    # 联网补充判断
+    # 联网补充 — 始终执行，确保 KB 无匹配时有后备
     top_score = top_results[0].get("score", top_results[0].get("relevance", 0)) if top_results else 0
     needs_web = (not top_results) or (top_score < NEED_WEB_THRESHOLD)
 
@@ -1111,12 +1208,11 @@ def _do_retrieve(query_text: str) -> dict:
     print(f"  📊 Top 3 分数: {[(r.get('page','?'), round(r.get('score',r.get('relevance',0)),3)) for r in top_results[:3]]}")
     print(f"  📊 top_score={round(top_score,3)}, threshold={NEED_WEB_THRESHOLD}, needs_web={needs_web}")
 
-    # 联网搜索
-    web_results = []
-    if needs_web:
-        web_results = web_search(query_text, max_results=5)
+    # 联网搜索 — 始终执行以覆盖 KB 覆盖不到的领域
+    web_results = web_search(query_text, max_results=5)
+    print(f"  🌐 联网搜索: {len(web_results)} 条结果")
 
-    # 构建上下文
+    # 构建上下文：KB 优先，网络补充
     kb_context = "\n\n".join(
         f"【来源: {r['page']} ({r.get('category', '')})】\n{r.get('excerpt', r.get('text', ''))}"
         for r in top_results[:5]
@@ -1124,6 +1220,17 @@ def _do_retrieve(query_text: str) -> dict:
 
     source_type = "knowledge"
     full_context = kb_context
+
+    # 判断 KB 是否真正命中：top_score 高 + 结果数 > 0 + 核心词匹配
+    real_kb_hit = top_results and top_score >= 0.85
+    if real_kb_hit and top_results:
+        # 额外检查：top1 结果必须包含查询中至少一个核心关键词（≥3字符）
+        top1_excerpt = (top_results[0].get("excerpt", "") + " " + top_results[0].get("page", "")).lower()
+        core_kws = [kw.lower() for kw in _extract_keywords(query_text) if len(kw) >= 3]
+        kw_match = any(kw in top1_excerpt for kw in core_kws)
+        if not kw_match:
+            real_kb_hit = False
+            print(f"  ⚠️ KB top1 不含查询核心关键词({core_kws[:3]}...)，降级为 web")
 
     if web_results:
         web_context_parts = []
@@ -1133,12 +1240,21 @@ def _do_retrieve(query_text: str) -> dict:
             )
         web_context = "\n\n".join(web_context_parts)
 
-        if kb_context:
-            full_context = f"【知识库结果（优先参考）】\n{kb_context}\n\n【网络搜索补充】\n{web_context}"
+        if real_kb_hit:
+            # KB 强势命中，网络仅作补充
+            full_context = f"【知识库结果（优先参考）】\n{kb_context}\n\n【网络搜索补充（仅供参考）】\n{web_context}"
             source_type = "hybrid"
+        elif kb_context:
+            # KB 弱匹配，网络同等权重
+            full_context = f"【知识库结果（可能不相关）】\n{kb_context}\n\n【网络搜索结果（请优先参考）】\n{web_context}"
+            source_type = "web"
         else:
             full_context = f"【网络搜索结果】\n{web_context}"
             source_type = "web"
+    else:
+        if not real_kb_hit:
+            # KB 弱匹配且无网络结果
+            source_type = "llm"
 
     return {
         "query": query_text,
@@ -1147,6 +1263,7 @@ def _do_retrieve(query_text: str) -> dict:
         "context": full_context,
         "results": top_results,
         "web_results": web_results,
+        "top_score": top_score,
     }
 
 
@@ -1164,18 +1281,29 @@ async def query(request: Request):
 
     retrieval = _do_retrieve(query_text)
     context = retrieval["context"]
+    top_score = retrieval.get("top_score", 0)
+    source_type = retrieval["source_type"]
 
     answer = ""
-    if context.strip():
+    if context.strip() and source_type != "llm":
         answer = _ask_llm(query_text, context, history)
     else:
-        answer = "[知识库和网络均无相关结果]"
+        # 知识库 + 网络均无结果，LLM 自主推理
+        answer = _ask_llm_raw(
+            "你是一个博学的AI助手。请基于你自身的知识直接回答用户问题，尽可能准确和详细。可以引用网络上的公开信息。如果涉及实时数据请说明信息来源。",
+            query_text
+        )
+        source_type = "llm"
+
+    if source_type in ("web", "llm"):
+        _schedule_save_if_new(query_text, answer, retrieval)
 
     return JSONResponse(content={
         "query": query_text,
         "strategy": retrieval["strategy"],
         "answer": answer,
-        "source_type": retrieval["source_type"],
+        "source_type": source_type,
+        "top_score": top_score,
         "results": retrieval["results"],
     })
 
@@ -1193,19 +1321,24 @@ async def query_stream(request: Request):
         return JSONResponse(content={"results": [], "strategy": "empty"})
 
     retrieval = _do_retrieve(query_text)
+    top_score = retrieval.get("top_score", 0)
+    source_type = retrieval["source_type"]
+
+    fallback_answer = None
 
     async def event_generator():
+        nonlocal fallback_answer
         # 1. 发送来源数据
         yield f'data: {json.dumps({"type": "sources", "data": retrieval["results"]})}\n\n'
         yield f'data: {json.dumps({"type": "meta", "data": {"strategy": retrieval["strategy"], "source_type": retrieval["source_type"]}})}\n\n'
 
         # 2. 流式发送 LLM tokens
         context = retrieval["context"]
-        if context.strip():
-            full_answer = ""
+        full_answer = ""
+
+        if context.strip() and source_type != "llm":
             async for chunk in _ask_llm_stream(query_text, context, history):
                 yield chunk
-                # 累加以供后续使用
                 try:
                     if chunk.startswith("data: "):
                         data = json.loads(chunk[6:])
@@ -1213,11 +1346,29 @@ async def query_stream(request: Request):
                             full_answer += data.get("data", "")
                 except:
                     pass
-
-            # 3. 发送完成事件（包含完整 answer 供前端缓存）
-            yield f'data: {json.dumps({"type": "done", "data": {"answer": full_answer, "source_type": retrieval["source_type"], "strategy": retrieval["strategy"], "results": retrieval["results"]}})}\n\n'
         else:
-            yield f'data: {json.dumps({"type": "done", "data": {"answer": "知识库和网络均无相关结果", "source_type": "empty", "strategy": retrieval["strategy"], "results": []}})}\n\n'
+            # KB + web 均无结果，LLM 自行推理
+            retrieval["source_type"] = "llm"
+            async for chunk in _ask_llm_stream_raw(
+                "你是一个博学的AI助手。请基于你自己的知识回答用户问题，尽可能准确和详细。积极搜索参考网络上的最新信息。如果涉及实时信息，请说明信息来源。",
+                query_text
+            ):
+                yield chunk
+                try:
+                    if chunk.startswith("data: "):
+                        data = json.loads(chunk[6:])
+                        if data.get("type") == "token":
+                            full_answer += data.get("data", "")
+                except:
+                    pass
+            fallback_answer = full_answer
+
+        # 3. 发送完成事件
+        yield f'data: {json.dumps({"type": "done", "data": {"answer": full_answer, "source_type": retrieval["source_type"], "strategy": retrieval["strategy"], "results": retrieval["results"]}})}\n\n'
+
+        # 4. 2 秒后自动写入知识库（仅当知识库未命中时）
+        if retrieval["source_type"] in ("web", "llm") and full_answer:
+            _schedule_save_if_new(query_text, full_answer, retrieval)
 
     return StreamingResponse(
         event_generator(),
@@ -1732,6 +1883,55 @@ async def abnormal(request: Request):
     _abnormal_cache["data"] = data
     _abnormal_cache["time"] = now
     return JSONResponse(content=data)
+
+
+# ============================================================
+# API - 管理员日志查看
+# ============================================================
+
+LOG_FILE = Path(__file__).parent / ".kb-webui.log"
+BORE_LOG_FILE = Path(__file__).parent / ".kb-tunnel.log"
+
+
+@app.get("/admin/access-log")
+async def admin_access_log(request: Request, lines: int = 100):
+    """查看访问日志 —— 需要管理员密码验证（前端 already gates with LINyao）"""
+    if not _is_authenticated(request):
+        return JSONResponse(status_code=401, content={"error": "未认证"})
+    
+    result = {"web_log": [], "bore_log": [], "total_requests": 0, "unique_ips": []}
+    
+    # 读web日志
+    if LOG_FILE.exists():
+        raw = LOG_FILE.read_text(errors="replace")
+        web_lines = raw.strip().split("\n")[-lines:]
+        # 提取重要行：请求行、错误、启动信息
+        important = []
+        for line in web_lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            # 过滤掉标准uvicorn INFO日志里的无聊内容
+            if any(kw in stripped for kw in ['GET ', 'POST ', 'DELETE ', 'PUT ', 'ERROR', 'WARNING', '启动', '密码', '模型', '图谱', '引擎', '前端', '向量', '公网', 'HTTP']):
+                important.append(stripped)
+        result["web_log"] = important
+        
+        # 统计
+        ip_counts = {}
+        for line in web_lines:
+            match = __import__("re").search(r'(\d+\.\d+\.\d+\.\d+)', line)
+            if match:
+                ip = match.group(1)
+                ip_counts[ip] = ip_counts.get(ip, 0) + 1
+        result["total_requests"] = len(web_lines)
+        result["unique_ips"] = sorted(ip_counts.items(), key=lambda x: -x[1])
+    
+    # 读bore日志
+    if BORE_LOG_FILE.exists():
+        raw = BORE_LOG_FILE.read_text(errors="replace")
+        result["bore_log"] = [l.strip() for l in raw.strip().split("\n")[-20:] if l.strip()]
+    
+    return JSONResponse(content=result)
 
 
 # ============================================================

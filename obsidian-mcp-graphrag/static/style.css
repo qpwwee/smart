@@ -409,19 +409,30 @@ button { cursor: pointer; }
 }
 
 /* ============================================================
-   知识图谱
+   股票走势图面板
    ============================================================ */
-#graphPanel { margin-top: 24px; }
-.graph-search-input {
-  padding: 8px 12px;
+#stockChartPanel { margin-top: 24px; }
+.chart-type-select {
+  padding: 6px 10px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 6px;
   background: var(--bg-input);
   color: var(--text);
+  font-size: 12px;
   outline: none;
-  transition: border-color 0.2s;
+  cursor: pointer;
 }
-.graph-search-input:focus { border-color: var(--accent); }
+.chart-type-select:focus { border-color: var(--accent); }
+
+/* 通用图表容器/按钮/图例 */
+.graph-container {
+  width: 100%;
+  height: 480px;
+  background: #0d0d1a;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  margin-top: 8px;
+}
 .graph-btn {
   padding: 8px 12px;
   border: 1px solid var(--border);
@@ -429,18 +440,10 @@ button { cursor: pointer; }
   background: transparent;
   color: var(--text-muted);
   font-size: 16px;
+  cursor: pointer;
   transition: all 0.2s;
 }
 .graph-btn:hover { color: var(--accent); border-color: var(--accent); }
-
-.graph-container {
-  width: 100%;
-  height: 520px;
-  background: #0d0d1a;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border);
-  margin-top: 8px;
-}
 .graph-legend {
   display: flex;
   gap: 16px;
@@ -448,19 +451,177 @@ button { cursor: pointer; }
   margin-top: 8px;
   font-size: 12px;
   color: var(--text-muted);
+  flex-wrap: wrap;
 }
-.graph-legend-item {
+
+/* ============================================================
+   管理员密码弹窗
+   ============================================================ */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.65);
+  z-index: 10000;
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.2s ease;
 }
-.graph-legend-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-  margin-right: 4px;
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.modal-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  width: 360px;
+  max-width: 90vw;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+  animation: slideUp 0.25s ease;
 }
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+.modal-close:hover { background: var(--bg-hover); color: var(--red); }
+.modal-body { padding: 20px; }
+.modal-error { font-size: 13px; color: var(--red); margin-top: 8px; }
+.modal-footer {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+}
+.modal-btn-cancel {
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.modal-btn-cancel:hover { border-color: var(--text-secondary); }
+.modal-btn-confirm {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 6px;
+  background: linear-gradient(135deg, var(--accent), #3f37c9);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.modal-btn-confirm:hover { opacity: 0.85; }
+
+/* ============================================================
+   UI 美化
+   ============================================================ */
+.header {
+  backdrop-filter: blur(12px);
+  background: rgba(26,26,46,0.85);
+  box-shadow: 0 1px 20px rgba(108,99,255,0.06);
+}
+.light-mode .header { background: rgba(255,255,255,0.85); box-shadow: 0 1px 20px rgba(0,0,0,0.04); }
+.header-btn {
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: rgba(108,99,255,0.08);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.25s;
+  backdrop-filter: blur(4px);
+}
+.header-btn:hover {
+  background: rgba(108,99,255,0.18);
+  color: var(--accent);
+  border-color: rgba(108,99,255,0.25);
+  transform: translateY(-1px);
+}
+.answer-stream-container, .answer-card {
+  border: 1px solid rgba(108,99,255,0.12);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.15);
+  backdrop-filter: blur(2px);
+}
+.search-box {
+  border: 1px solid rgba(108,99,255,0.15);
+  transition: all 0.3s;
+}
+.search-box:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(108,99,255,0.12);
+}
+.search-btn {
+  box-shadow: 0 4px 16px rgba(108,99,255,0.25);
+}
+.search-btn:hover {
+  box-shadow: 0 6px 24px rgba(108,99,255,0.35);
+  transform: translateY(-1px);
+}
+.market-header-bar {
+  border: 1px solid rgba(108,99,255,0.08);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+}
+.market-tab {
+  font-weight: 500;
+  transition: all 0.25s;
+}
+.market-tab:hover {
+  background: rgba(108,99,255,0.08);
+  border-color: rgba(108,99,255,0.2);
+}
+.market-tab.active {
+  box-shadow: 0 4px 16px rgba(108,99,255,0.3);
+  font-weight: 600;
+}
+
+/* 管理员按钮特殊样式 */
+#adminBtn {
+  background: rgba(255,159,67,0.1);
+  border-color: rgba(255,159,67,0.15);
+}
+#adminBtn:hover {
+  background: rgba(255,159,67,0.2);
+  border-color: rgba(255,159,67,0.3);
+  color: var(--orange);
+}
+
+/* 自选股item美化 */
+.watch-item {
+  transition: all 0.2s;
+}
+.watch-item:hover {
+  background: rgba(108,99,255,0.06);
+  border-color: rgba(108,99,255,0.2);
+  transform: translateX(4px);
+}
+
+/* 滚动条美化 */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(108,99,255,0.2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(108,99,255,0.35); }
 
 /* ============================================================
    行情面板
@@ -706,7 +867,7 @@ button { cursor: pointer; }
   .abnormal-grid { flex-direction: column; }
   .abnormal-col { min-width: auto; }
   .market-tab { font-size: 12px; padding: 6px 10px; }
-  .graph-container { height: calc(100vh - 200px); }
+  .graph-container { height: 400px; }
   .login-card, .login-box { width: 90%; max-width: 340px; padding: 30px; }
 }
 
